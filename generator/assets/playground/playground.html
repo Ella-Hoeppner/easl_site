@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en" data-monaco="https://cdn.jsdelivr.net/npm/monaco-editor@__MONACO_VERSION__/min">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playground — Easl</title>
+<meta name="description" content="Write easl in your browser and run it live: shaders, compute, and the CPU code that drives them, all in one program.">
+<link rel="stylesheet" href="__PLAYGROUND__/playground.css?v=__VERSION__">
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@__MONACO_VERSION__/min/vs/loader.js"></script>
+</head>
+<body>
+<header class="bar">
+  <a class="wordmark" href="index.html">easl</a>
+  <span class="page-name">playground</span>
+  <div id="example-picker" class="example-picker">
+    <button id="example" class="example-button" aria-haspopup="menu" aria-expanded="false" title="Choose an example"></button>
+    <ul id="example-menu" class="menu" role="menu" aria-label="Examples" hidden></ul>
+  </div>
+  <div class="actions">
+    <button id="rename" title="Rename this sketch" hidden>Rename</button>
+    <button id="run" class="primary" title="Run (Ctrl/⌘+Enter)">▶ Run</button>
+    <button id="pause" disabled>Pause</button>
+    <button id="stop" disabled>Stop</button>
+    <button id="format" title="Format (Shift+Alt+F)">Format</button>
+    <button id="reset" title="Discard your changes to this example" disabled>Reset</button>
+  </div>
+  <label class="toggle" title="Format the program each time you save (Ctrl/⌘+S)">
+    <input type="checkbox" id="format-on-save" checked>
+    Format on save
+  </label>
+  <button id="status" class="status" data-kind="analyzing" title="Click to go to the next problem">Checking…</button>
+  <nav class="links">
+    <a href="guide.html">Docs</a>
+    <button id="help" class="icon" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+  </nav>
+</header>
+
+<main id="panes" class="panes">
+  <section class="editor-pane" aria-label="Editor">
+    <div id="editor" class="editor"></div>
+  </section>
+  <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
+  <section class="output-pane" aria-label="Output">
+    <div id="stage" class="stage">
+      <div class="stage-message">
+        <p class="idle-message">Press <strong>Run</strong> to start the program.</p>
+        <p class="checking-message">Checking the program…</p>
+        <p class="no-webgpu-message">Running programs needs a browser with WebGPU (current Chrome, Edge, or Safari). You can still edit, and the editor still checks your code.</p>
+      </div>
+    </div>
+    <div id="console-splitter" class="splitter horizontal" role="separator" aria-orientation="horizontal" title="Drag to resize the console"></div>
+    <div class="console-bar">
+      <span>Console</span>
+      <span class="console-hint">Click the canvas to give the program the keyboard (and let it play sound).</span>
+      <button id="clear" class="small">Clear</button>
+    </div>
+    <div class="console-wrap">
+      <p id="console-empty" class="console-empty">What the program prints, and any errors, appear here.</p>
+      <div id="console" class="console" aria-live="polite"></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="help-dialog" class="help">
+  <h2>Keyboard shortcuts</h2>
+  <table id="shortcuts"></table>
+  <p>Hover over a name to see its type or declaration. Edits to each example are saved in this browser until you reset it, and so are your sketches (New sketch… in the example menu).</p>
+  <form method="dialog"><button id="help-close">Close</button></form>
+</dialog>
+
+<dialog id="rename-dialog" class="help rename">
+  <form method="dialog">
+    <h2><label for="rename-input">Rename sketch</label></h2>
+    <input id="rename-input" type="text" autocomplete="off" spellcheck="false">
+    <div class="dialog-buttons">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="rename" class="primary">Rename</button>
+    </div>
+  </form>
+</dialog>
+
+<script id="examples" type="application/json">__EXAMPLES__</script>
+<script type="module" src="__PLAYGROUND__/playground.js?v=__VERSION__"></script>
+</body>
+</html>

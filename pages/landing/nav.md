@@ -1,0 +1,5 @@
+- [Guide](guide.md)
+- [Playground](playground.html)
+- [Reference](reference/overview.md)
+- [Functions](functions.html)
+- [GitHub](https://github.com/Ella-Hoeppner/easl)

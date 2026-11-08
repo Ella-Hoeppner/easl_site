@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>easl playground program</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" tabindex="0"></canvas>
+    <script type="module">
+      // Runs one playground program. The playground makes a fresh iframe
+      // with this page for every run, so ending a run (removing the iframe)
+      // frees everything the program held: its runtime instance, its GPU
+      // device, and its window-level input listeners.
+      const runtime = new URL("__RUNTIME__/", location.href);
+
+      // Compiles a wasm module, streaming, so the browser can cache the
+      // compiled code and later runs start faster.
+      async function compile(file) {
+        const url = new URL(`${file}?v=__VERSION__`, runtime);
+        try {
+          return await WebAssembly.compileStreaming(fetch(url));
+        } catch {
+          return WebAssembly.compile(await (await fetch(url)).arrayBuffer());
+        }
+      }
+
+      // The runtime build that compiles programs from their sources
+      // (easl_web_compiler.js). Its audio worklet runs the plain runtime
+      // (easl_web.js), loaded only when a program starts audio. Before the
+      // web runtime was split in two, easl_web.js was the only build and
+      // compiled programs itself; a site built from such a runtime has no
+      // compiler build (the generator fills in which).
+      const HAS_COMPILER_BUILD = __HAS_COMPILER_BUILD__;
+
+      async function load() {
+        if (HAS_COMPILER_BUILD) {
+          const web = await import(new URL("easl_web_compiler.js?v=__VERSION__", runtime));
+          await web.default({ module_or_path: await compile("easl_web_compiler_bg.wasm") });
+          let audioModule = null;
+          return {
+            web,
+            start: web.startProgramFromSources,
+            audioModule: () => (audioModule ??= compile("easl_web_bg.wasm")),
+          };
+        }
+        const web = await import(new URL("easl_web.js?v=__VERSION__", runtime));
+        const module = await compile("easl_web_bg.wasm");
+        await web.default({ module_or_path: module });
+        return { web, start: web.startProgram, audioModule: module };
+      }
+
+      const loaded = load();
+
+      /**
+       * Starts `source` on this page's canvas and returns the program
+       * (`pause`, `resume`, `paused`, `finished`). `onPrint` gets each line
+       * the program prints.
+       */
+      window.runEasl = async (source, onPrint) => {
+        const { web, start, audioModule } = await loaded;
+        const canvas = document.getElementById("canvas");
+        return start(
+          canvas,
+          "playground.easl",
+          ["playground.easl"],
+          [source],
+          {
+            module: audioModule,
+            workletUrl: new URL("easl-audio-worklet.js?v=__VERSION__", runtime).href,
+            startMidi: () => listenToMidi(web),
+            onPrint,
+          },
+        );
+      };
+
+      // Clicking the canvas gives the program the keyboard.
+      document.addEventListener("pointerdown", () =>
+        document.getElementById("canvas").focus(),
+      );
+
+      async function listenToMidi(web) {
+        if (!navigator.requestMIDIAccess) return;
+        try {
+          const access = await navigator.requestMIDIAccess();
+          const listen = (input) => {
+            input.onmidimessage = (event) => web.sendMidiMessage(event.data);
+          };
+          access.inputs.forEach(listen);
+          access.onstatechange = (event) => {
+            if (event.port.type === "input" && event.port.state === "connected") {
+              listen(event.port);
+            }
+          };
+        } catch (error) {
+          console.warn("easl: MIDI unavailable:", error);
+        }
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+[package]
+name = "easl_playground_lsp_types"
+version = "0.0.0"
+edition = "2024"
+
+# Provides `tower_lsp::lsp_types` (the version tower-lsp 0.20 uses) for the
+# easl_lsp modules the playground includes.
+
+[dependencies]
+lsp-types = "=0.94.1"

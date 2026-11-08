@@ -1,0 +1,99 @@
+(def grid-dimensions: vec2u
+     (vec2u 192u 108u))
+
+(def cell-count: u32
+     (u32 (* grid-dimensions.x
+             grid-dimensions.y)))
+
+@storage-write
+(var cells: [cell-count: u32])
+
+(defn coords->index [coords: vec2i]: (Option u32)
+  (if (and (all (>= coords (vec2i 0i)))
+           (all (< coords
+                   (vec2i grid-dimensions))))
+    (Some (u32 (+ coords.x
+                  (* (i32 grid-dimensions.x)
+                     coords.y))))
+    None))
+
+(defn index->coords [i: u32]: (Option vec2i)
+  (if (< i cell-count)
+    (Some (vec2i (% i grid-dimensions.x)
+                 (/ i grid-dimensions.x)))
+    None))
+
+(defn coords-at-pixel [pixel: vec2f]: vec2i
+  (-> pixel
+      (/ (vec2f (.xy (window-resolution))))
+      (* (vec2f grid-dimensions))
+      vec2i))
+
+@compute
+@{workgroup-size 64}
+(defn step-life []
+  (let [index (.x (global-invocation-id))
+        @var new-value None]
+    (match (index->coords index)
+      (Some coords) (let [@var sum 0u]
+                      (for [x 3i]
+                        (for [y 3i]
+                          (when (or (!= x 1i) (!= y 1i))
+                            (match (coords->index (+ coords (- (vec2i x y) 1i)))
+                              (Some i) (+= sum (cells i))
+                              None ()))))
+                      (= new-value
+                         (Some (if (or (== sum 3u)
+                                       (and (== sum 2u)
+                                            (== (cells index) 1u)))
+                                 1u
+                                 0u))))
+      None ())
+    (storage-barrier)
+    (match new-value
+      (Some value) (= (cells index) value)
+      None ())))
+
+(defn vert []: vec4f
+  ([(vec4f -1. -1. 0. 1.)
+    (vec4f -1. 3. 0. 1.)
+    (vec4f 3. -1. 0. 1.)]
+   (vertex-index)))
+
+(defn frag []: vec4f
+  (match (coords->index (coords-at-pixel (.xy (position))))
+    (Some i) (match (cells i)
+               0u (vec4f 0.02 0.02 0.04 1.)
+               _ (vec4f 0.75 0.65 1. 1.))
+    None (vec4f 0. 0. 0. 1.)))
+
+(defn hash [n: u32]: u32
+  (let [@var x (* n 747796405u)]
+    (^= x (>> x 16u))
+    (*= x 2246822519u)
+    (^= x (>> x 13u))
+    x))
+
+@cpu
+(defn main []
+  (for [i cell-count]
+    (= (cells i)
+       (if (< (% (hash i) 100u) 30u)
+         1u
+         0u)))
+  (spawn-window (fn []
+                  (when (mouse-down?)
+                    (let [coords (coords-at-pixel ~(mouse-coords))]
+                      (for [x 3i]
+                        (for [y 3i]
+                          (match (coords->index (+ coords (- (vec2i x y) 1)))
+                            (Some i) (= (cells i) 1u)
+                            None ())))))
+                  (when (== (% (window-frame-index) 10u)
+                            0u)
+                    (dispatch-compute-shader
+                      step-life
+                      (vec3u (/ (+ cell-count 63u) 64u)
+                             1u
+                             1u)))
+                  (dispatch-render-shaders vert frag 3))))

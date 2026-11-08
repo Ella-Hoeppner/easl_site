@@ -1,0 +1,16 @@
+(defn vert []: vec4f
+  (match (vertex-index)
+    0u (vec4f -1. -1. 0. 1.)
+    1u (vec4f -1. 3. 0. 1.)
+    _ (vec4f 3. -1. 0. 1.)))
+
+(defn frag []: vec4f
+  (vec4f (/ (.xy (position))
+            (vec2f (window-resolution)))
+         0.
+         1.))
+
+@cpu
+(defn main []
+  (spawn-window (fn []
+                  (dispatch-render-shaders vert frag 3))))
