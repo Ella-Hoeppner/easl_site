@@ -1095,9 +1095,15 @@ async function run() {
   if (token !== runToken) return;
   let program;
   try {
-    program = await iframe.contentWindow.runEasl(source, (line) => {
-      if (token === runToken) log("print", line);
-    });
+    program = await iframe.contentWindow.runEasl(
+      source,
+      (line) => {
+        if (token === runToken) log("print", line);
+      },
+      (message) => {
+        if (token === runToken) log("error", message);
+      },
+    );
   } catch (error) {
     if (token !== runToken) return;
     log("error", String(error?.message ?? error));

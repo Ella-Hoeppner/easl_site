@@ -49,7 +49,7 @@ const EXTRA_EXAMPLES_PATH: &str = "../pages/playground";
 /// The files in `EXTRA_EXAMPLES_PATH` and their titles, in menu order.
 const EXTRA_EXAMPLES: &[(&str, &str)] = &[
   ("game-of-life.easl", "Conway's Game of Life"),
-  ("theremin.easl", "Theremin: sound from the mouse"),
+  ("wavetable.easl", "Wavetable"),
 ];
 
 /// The program a new sketch starts with.

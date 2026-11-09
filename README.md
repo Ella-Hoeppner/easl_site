@@ -29,6 +29,20 @@ cd generator
 cargo watch -w ../pages -w assets -w src -x run
 ```
 
+## Deploying
+
+`./deploy.sh` builds the site from scratch and uploads it to the server behind easl-lang.org, replacing what's there. It connects through an SSH host named `easl-site`, which `~/.ssh/config` defines:
+
+```
+Host easl-site
+  HostName 2.31.116.198
+  User root
+  IdentityFile ~/.ssh/easl_site
+  IdentitiesOnly yes
+```
+
+The server (a Hetzner Cloud machine running Ubuntu) serves `/srv/easl-site` with [Caddy](https://caddyserver.com), which gets the HTTPS certificates itself (WebGPU only runs on HTTPS pages) and compresses responses. Its configuration is `/etc/caddy/Caddyfile`: `www.easl-lang.org` redirects to `easl-lang.org`, and every file is served `Cache-Control: no-cache` (browsers revalidate it on each load, so a deploy shows up at once) except the playground's, which it asks for with its build's hash (`?v=…`) and which are kept for good. Uploads go in as the `deploy` user, which owns `/srv/easl-site`; root logs in with the same key, for administering the server. The domain's DNS is at Cloudflare, with the proxy off ("DNS only"), so that Caddy can get certificates for it.
+
 ## The landing page
 
 Everything on the landing page (`generator/src/landing.rs`) comes from `pages/`, read on every build, so editing it means editing those files:

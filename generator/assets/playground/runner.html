@@ -69,9 +69,10 @@
       /**
        * Starts `source` on this page's canvas and returns the program
        * (`pause`, `resume`, `paused`, `finished`). `onPrint` gets each line
-       * the program prints.
+       * the program prints, and `onAudioError` each error from the audio
+       * thread (which stops the audio, not the program).
        */
-      window.runEasl = async (source, onPrint) => {
+      window.runEasl = async (source, onPrint, onAudioError) => {
         const { web, start, audioModule } = await loaded;
         const canvas = document.getElementById("canvas");
         return start(
@@ -84,6 +85,7 @@
             workletUrl: new URL("easl-audio-worklet.js?v=__VERSION__", runtime).href,
             startMidi: () => listenToMidi(web),
             onPrint,
+            onAudioError,
           },
         );
       };
