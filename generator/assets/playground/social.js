@@ -39,6 +39,9 @@ export class Social {
     for (const panel of document.querySelectorAll(".panel")) {
       panel.hidden = panel.id !== `${name}-panel`;
     }
+    // Clearing, and the hint about the canvas, are about the console.
+    $("clear").hidden = name !== "console";
+    document.querySelector(".console-hint").hidden = name !== "console";
     if (name === "comments") this.loadComments();
   }
 
