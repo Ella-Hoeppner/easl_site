@@ -17,10 +17,91 @@
         height: 100%;
         outline: none;
       }
+      /* Shown while the program's audio waits for a click: browsers start
+         audio only after the visitor interacts with the page. */
+      .audio-overlay {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: rgb(0 0 0 / 0.45);
+        cursor: pointer;
+        font: 600 15px/1.3 system-ui, -apple-system, sans-serif;
+        color: #fff;
+      }
+      .audio-overlay[hidden] {
+        display: none;
+      }
+      .audio-overlay span {
+        display: flex;
+        align-items: center;
+        gap: 0.6em;
+        padding: 0.7em 1.2em;
+        border-radius: 999px;
+        background: rgb(20 20 26 / 0.85);
+        border: 1px solid rgb(255 255 255 / 0.25);
+        box-shadow: 0 6px 24px rgb(0 0 0 / 0.4);
+      }
+      .audio-overlay svg {
+        width: 1.2em;
+        height: 1.2em;
+      }
     </style>
   </head>
   <body>
     <canvas id="canvas" tabindex="0"></canvas>
+    <div id="audio-overlay" class="audio-overlay" hidden>
+      <span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3.5v11L5 10H2z" fill="currentColor"/><path d="M11 5.5c1 .7 1.5 1.6 1.5 2.5s-.5 1.8-1.5 2.5M12.5 3.5c1.6 1.1 2.5 2.7 2.5 4.5s-.9 3.4-2.5 4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Click to play audio</span>
+    </div>
+    <script>
+      // The program's audio, under the editor's control: every audio
+      // context the runtime makes sends its output through a gain node,
+      // whose level the editor sets (`setEaslVolume`, 0 to 1), and while a
+      // context waits for the visitor's first click (browsers start audio
+      // only then), the overlay asks for one. A context the page suspended
+      // to pause the program doesn't ask (`setEaslPaused`).
+      (() => {
+        const contexts = [];
+        let volume = 1;
+        let paused = false;
+        const overlay = document.getElementById("audio-overlay");
+        const update = () => {
+          overlay.hidden =
+            paused || !contexts.some(({ context }) => context.state === "suspended");
+        };
+        const Native = window.AudioContext;
+        const nativeDestination = Object.getOwnPropertyDescriptor(
+          BaseAudioContext.prototype,
+          "destination",
+        ).get;
+        window.AudioContext = class extends Native {
+          constructor(...args) {
+            super(...args);
+            const gain = new GainNode(this, { gain: volume });
+            gain.connect(nativeDestination.call(this));
+            // The runtime connects its output to `destination`.
+            Object.defineProperty(this, "destination", { value: gain });
+            contexts.push({ context: this, gain });
+            this.addEventListener("statechange", update);
+            update();
+          }
+        };
+        window.setEaslVolume = (level) => {
+          volume = level;
+          for (const { context, gain } of contexts) {
+            gain.gain.setTargetAtTime(level, context.currentTime, 0.015);
+          }
+        };
+        window.setEaslPaused = (isPaused) => {
+          paused = isPaused;
+          update();
+        };
+        overlay.addEventListener("click", () => {
+          for (const { context } of contexts) context.resume();
+          document.getElementById("canvas").focus();
+        });
+      })();
+    </script>
     <script type="module">
       // Runs one program for the editor, which makes a fresh iframe
       // with this page for every run, so ending a run (removing the iframe)
@@ -86,12 +167,14 @@
 
       /**
        * Starts a compiled program (`bytes`, from `compileEasl`) on this
-       * page's canvas at its `@cpu` entry point `entry`, and returns it
-       * (`pause`, `resume`, `paused`, `finished`). `onPrint` gets each line
+       * page's canvas at its `@cpu` entry point `entry`, with its audio at
+       * `volume` (0 to 1), and returns it (`pause`, `resume`, `paused`,
+       * `finished`). `onPrint` gets each line
        * the program prints, and `onAudioError` each error from the audio
        * thread (which stops the audio, not the program).
        */
-      window.runEasl = async ({ bytes, entry, onPrint, onAudioError }) => {
+      window.runEasl = async ({ bytes, entry, volume = 1, onPrint, onAudioError }) => {
+        setEaslVolume(volume);
         // The build this page already loaded to compile can run it too.
         const web = await (compilerBuild ?? loadPlainBuild());
         return web.startProgram(document.getElementById("canvas"), bytes, {

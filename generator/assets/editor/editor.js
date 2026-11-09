@@ -1035,6 +1035,49 @@ async function run() {
 }
 
 $("run").addEventListener("click", () => run());
+
+// The volume: the speaker mutes and unmutes (dragging the slider up from
+// silence unmutes too), and its icon shows the level.
+function showVolume() {
+  const level = runner.outputVolume;
+  const icon = $("mute").querySelector(".run-icon");
+  icon.className = `run-icon ${level === 0 ? "volume-muted" : level < 0.5 ? "volume-low" : "volume-high"}`;
+  $("mute").title = runner.muted ? "Unmute" : "Mute";
+  $("mute").setAttribute("aria-label", $("mute").title);
+  $("volume-slider").value = String(runner.muted ? 0 : runner.volume);
+}
+$("mute").addEventListener("click", () => {
+  if (runner.muted) {
+    runner.setMuted(false);
+  } else if (runner.volume > 0) {
+    runner.setMuted(true);
+  }
+  // Unmuting a volume dragged down to silence brings it back up.
+  if (!runner.muted && runner.volume === 0) runner.setVolume(0.5);
+  showVolume();
+});
+$("volume-slider").addEventListener("input", (event) => {
+  const level = Number(event.target.value);
+  runner.setVolume(level);
+  if (runner.muted && level > 0) runner.setMuted(false);
+  showVolume();
+});
+showVolume();
+
+// Fullscreen shows just the canvas.
+$("fullscreen").addEventListener("click", () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else $("stage").requestFullscreen?.();
+});
+document.addEventListener("fullscreenchange", () => {
+  const full = document.fullscreenElement === $("stage");
+  const button = $("fullscreen");
+  button.querySelector(".run-icon").className = `run-icon ${full ? "fullscreen-exit" : "fullscreen"}`;
+  button.title = full ? "Exit fullscreen" : "Fullscreen";
+  button.setAttribute("aria-label", button.title);
+  // The program gets the keyboard, as it would after a click.
+  if (full) $("stage").querySelector("iframe")?.focus();
+});
 $("stop").addEventListener("click", () => runner.stop());
 $("pause").addEventListener("click", () => runner.togglePause());
 $("clear").addEventListener("click", () => runner.clearConsole());

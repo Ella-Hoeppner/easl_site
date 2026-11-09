@@ -80,6 +80,14 @@
         <button id="run" class="run-button icon-button" title="Run (Ctrl/⌘+Enter)" aria-label="Run"><span class="run-icon play" aria-hidden="true"></span></button>
         <button id="pause" class="icon-button" title="Pause" aria-label="Pause" disabled><span class="run-icon pause" aria-hidden="true"></span></button>
         <button id="stop" class="icon-button" title="Stop" aria-label="Stop" disabled><span class="run-icon stop" aria-hidden="true"></span></button>
+        <span class="run-divider" aria-hidden="true"></span>
+        <div id="volume" class="volume">
+          <button id="mute" class="icon-button" title="Mute" aria-label="Mute"><span class="run-icon volume-high" aria-hidden="true"></span></button>
+          <div class="volume-popover">
+            <input id="volume-slider" class="volume-slider" type="range" min="0" max="1" step="0.01" aria-label="Volume">
+          </div>
+        </div>
+        <button id="fullscreen" class="icon-button" title="Fullscreen" aria-label="Fullscreen"><span class="run-icon fullscreen" aria-hidden="true"></span></button>
       </div>
       <div id="entries" class="entries" aria-label="Entry points"></div>
     </div>

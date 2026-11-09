@@ -6,7 +6,7 @@
 // the canvas, the bar above it listing the document's `@cpu` entry points,
 // and taking a picture of the canvas (a sketch's thumbnail).
 
-import { $, el } from "./util.js?v=__VERSION__";
+import { $, el, storage } from "./util.js?v=__VERSION__";
 
 const MAX_CONSOLE_LINES = 1000;
 
@@ -47,6 +47,32 @@ export class Runner {
     this.state = "stopped";
     // Compiled programs (`{bytes, entryPoints}`) by `programKey`.
     this.compiled = new Map();
+    // The level programs' audio plays at (0 to 1), and whether it's muted,
+    // remembered across visits.
+    const saved = Number(storage.get("volume"));
+    this.volume = storage.get("volume") !== null && saved >= 0 && saved <= 1 ? saved : 1;
+    this.muted = storage.get("muted") === "true";
+  }
+
+  /** The level the running program's audio plays at. */
+  get outputVolume() {
+    return this.muted ? 0 : this.volume;
+  }
+
+  setVolume(volume) {
+    this.volume = volume;
+    storage.set("volume", String(volume));
+    this.applyVolume();
+  }
+
+  setMuted(muted) {
+    this.muted = muted;
+    storage.set("muted", String(muted));
+    this.applyVolume();
+  }
+
+  applyVolume() {
+    this.current?.iframe.contentWindow.setEaslVolume?.(this.outputVolume);
   }
 
   /** The compiled program for `key`, if there is one (marking it the most
@@ -118,11 +144,14 @@ export class Runner {
 
   togglePause() {
     if (!this.current) return;
+    const runner = this.current.iframe.contentWindow;
     if (this.current.program.paused) {
       this.current.program.resume();
+      runner.setEaslPaused?.(false);
       this.setState("running");
     } else {
       this.current.program.pause();
+      runner.setEaslPaused?.(true);
       this.setState("paused");
     }
   }
@@ -199,6 +228,7 @@ export class Runner {
       program = await iframe.contentWindow.runEasl({
         bytes: compiled.bytes,
         entry: entry.name,
+        volume: this.outputVolume,
         onPrint: (line) => {
           if (token === this.token) this.log("print", line);
         },
