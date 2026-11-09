@@ -534,12 +534,31 @@ function renderFiles() {
 function setExplorerOpen(open, remember = true) {
   if (remember) explorerOpen.set(open);
   document.body.classList.toggle("explorer-closed", !open);
+  document.body.classList.remove("explorer-peeking");
   $("explorer-toggle").setAttribute("aria-expanded", String(open));
   $("explorer-toggle").title = open ? "Hide the files" : "Show the files";
 }
 $("explorer-toggle").addEventListener("click", () =>
   setExplorerOpen(document.body.classList.contains("explorer-closed")),
 );
+// While it's collapsed, the explorer slides out when the pointer reaches the
+// window's left edge, and goes away when the pointer leaves it (after a
+// moment, so a pointer that slips off briefly doesn't close it).
+let peekTimer = null;
+const peek = (peeking) => {
+  clearTimeout(peekTimer);
+  if (peeking) document.body.classList.add("explorer-peeking");
+  else peekTimer = setTimeout(() => document.body.classList.remove("explorer-peeking"), 250);
+};
+$("explorer-peek-zone").addEventListener("pointerenter", () => peek(true));
+$("explorer").addEventListener("pointerenter", () => {
+  if (document.body.classList.contains("explorer-peeking")) peek(true);
+});
+$("explorer").addEventListener("pointerleave", () => peek(false));
+$("explorer-peek-zone").addEventListener("pointerleave", (event) => {
+  if (!$("explorer").contains(event.relatedTarget)) peek(false);
+});
+
 // On a phone, the editor needs the whole width, so the explorer starts
 // closed there.
 setExplorerOpen(explorerOpen.get() && !matchMedia("(max-width: 40rem)").matches, false);

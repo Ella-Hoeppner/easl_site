@@ -48,7 +48,7 @@ function fraction(element, variable, key, min, max) {
 
 // The narrowest the file explorer can be dragged, and the least room it
 // leaves the editor, in pixels.
-const MIN_EXPLORER_WIDTH = 120;
+const MIN_EXPLORER_WIDTH = 72;
 const MIN_EDITOR_WIDTH = 200;
 
 export function setUpSplitters() {

@@ -484,6 +484,7 @@ button.icon {
 /* The file explorer beside the editor (collapsible), and the editor's
    column: the open files' tabs above the editor. */
 .editor-pane {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -500,6 +501,41 @@ body.explorer-closed .editor-pane {
 body.explorer-closed .explorer,
 body.explorer-closed #explorer-splitter {
   display: none;
+}
+
+/* A collapsed explorer slides out over the editor while the pointer is at
+   the window's left edge (the zone), and goes away when it leaves. */
+.explorer-peek-zone {
+  display: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 10px;
+  z-index: 15;
+}
+
+body.explorer-closed .explorer-peek-zone {
+  display: block;
+}
+
+body.explorer-closed.explorer-peeking .explorer {
+  display: block;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 16;
+  width: var(--explorer-width, 13rem);
+  box-shadow: 4px 0 18px rgb(0 0 0 / 0.25);
+  animation: explorer-slide 0.12s ease-out;
+}
+
+@keyframes explorer-slide {
+  from {
+    transform: translateX(-30%);
+    opacity: 0;
+  }
 }
 
 .editor-column {
@@ -544,7 +580,7 @@ body.explorer-closed #explorer-splitter {
   display: flex;
   align-items: center;
   gap: 0.1rem;
-  padding: 0.3rem 0.3rem 0.3rem 0.75rem;
+  padding: 0.25rem 0.15rem 0.25rem 0.45rem;
   position: sticky;
   top: 0;
   background: var(--bg-raised);
@@ -565,19 +601,24 @@ body.explorer-closed #explorer-splitter {
   padding: 0 0 0.6rem;
 }
 
+/* Rows are compact: a folder's chevron is all that comes before a name,
+   and the row's buttons (shown on hover) lie over its end rather than
+   taking room from the name. */
 .tree-row {
+  --row-bg: var(--bg-raised);
+  position: relative;
   display: flex;
   align-items: center;
-  padding-left: calc(0.4rem + var(--depth) * 0.9rem);
-  padding-right: 0.2rem;
+  padding-left: calc(0.15rem + var(--depth) * 0.7rem);
+  background: var(--row-bg);
 }
 
 .tree-row:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
+  --row-bg: color-mix(in srgb, var(--text) 7%, var(--bg-raised));
 }
 
 .tree-row.active {
-  background: var(--accent-soft);
+  --row-bg: var(--accent-soft);
 }
 
 .tree-name {
@@ -585,8 +626,8 @@ body.explorer-closed #explorer-splitter {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.25rem 0.2rem;
+  gap: 0.2rem;
+  padding: 0.2rem 0.3rem 0.2rem 0;
   border: none;
   border-radius: 0;
   background: none;
@@ -595,6 +636,10 @@ body.explorer-closed #explorer-splitter {
   font-size: 0.8rem;
   text-align: left;
   white-space: nowrap;
+}
+
+.tree-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -610,19 +655,20 @@ body.explorer-closed #explorer-splitter {
   font-size: 0.55rem;
 }
 
-.tree-row.folder .tree-icon.folder {
-  color: var(--accent);
-}
-
-.tree-row.file .tree-icon {
+.tree-row.folder .tree-label {
   color: var(--text-dim);
 }
 
 .tree-chevron {
-  width: 0.7rem;
+  width: 0.65rem;
   flex: none;
   color: var(--text-dim);
   font-size: 0.6rem;
+  text-align: center;
+}
+
+.tree.flat .tree-chevron.none {
+  width: 0.2rem;
 }
 
 .tree-chevron::before {
@@ -643,18 +689,24 @@ body.explorer-closed #explorer-splitter {
 }
 
 .tree-actions {
-  display: flex;
-  opacity: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: none;
+  align-items: center;
+  padding: 0 0.15rem 0 0.9rem;
+  background: linear-gradient(to right, transparent, var(--row-bg) 0.8rem);
 }
 
 .tree-actions .icon-button {
   padding: 0.2rem;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .tree-row:hover .tree-actions,
 .tree-actions:focus-within {
-  opacity: 1;
+  display: flex;
 }
 
 .tab-strip {

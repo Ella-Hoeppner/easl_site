@@ -21,6 +21,16 @@ function children(paths, folders, prefix) {
   return { folders: [...childFolders].sort(byName), files: childFiles.sort(byName) };
 }
 
+/** Every folder holding a file in `paths`, plus `folders`. */
+function allFolders(paths, folders) {
+  const all = new Set(folders);
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i++) all.add(parts.slice(0, i).join("/"));
+  }
+  return [...all];
+}
+
 const icon = (name) => el("span", { className: `tree-icon ${name}`, attrs: { "aria-hidden": "true" } });
 
 export class FileExplorer {
@@ -72,6 +82,8 @@ export class FileExplorer {
       }
     };
     walk("", 0);
+    // Without folders, files need no room for a folder's chevron.
+    this.list.classList.toggle("flat", allFolders(paths, doc.folders).length === 0);
     this.list.replaceChildren(...rows);
   }
 
@@ -89,7 +101,7 @@ export class FileExplorer {
     },
       el("button", { className: "tree-name", onclick: toggle, title: path },
         el("span", { className: `tree-chevron${open ? " open" : ""}`, attrs: { "aria-hidden": "true" } }),
-        icon("folder"), name),
+        el("span", { className: "tree-label" }, name)),
       el("span", { className: "tree-actions" },
         el("button", { className: "icon-button", title: `New file in ${path}`, attrs: { "aria-label": `New file in ${path}` }, onclick: () => this.actions.newFile(path) }, icon("new-file")),
         el("button", { className: "icon-button", title: `Rename ${path}`, attrs: { "aria-label": `Rename ${path}` }, onclick: () => this.actions.rename(path, true) }, icon("rename")),
@@ -105,7 +117,7 @@ export class FileExplorer {
     },
       el("button", { className: "tree-name", onclick: () => this.actions.open(path), title: path },
         el("span", { className: "tree-chevron none", attrs: { "aria-hidden": "true" } }),
-        icon("file"), name,
+        el("span", { className: "tree-label" }, name),
         entries ? el("span", { className: "tree-entry", title: "Has @cpu entry points" }, "▶") : null),
       el("span", { className: "tree-actions" },
         el("button", { className: "icon-button", title: `Rename ${path}`, attrs: { "aria-label": `Rename ${path}` }, onclick: () => this.actions.rename(path, false) }, icon("rename")),
