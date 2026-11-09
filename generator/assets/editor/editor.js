@@ -511,6 +511,7 @@ const explorer = new FileExplorer($("explorer"), {
   newFolder: (folder) => addFolder(folder),
   rename: (path, isFolder) => (isFolder ? renameFolder(path) : renameFile(path)),
   remove: (path, isFolder) => (isFolder ? removeFolder(path) : removeFile(path)),
+  move: (path, isFolder, target) => moveInTree(path, isFolder, target),
   refresh: () => renderFiles(),
 });
 
@@ -626,15 +627,18 @@ function folderPathProblem(path, except = null) {
 /** `folder` (a folder path or "") as a prefix for paths inside it. */
 const inside = (folder) => (folder ? `${folder}/` : "");
 
+/** Adds a file, asking for its name: in `folder` (a folder path, or "" for
+ * the top level), where the name can also include folders of its own. */
 async function addFile(folder = "") {
-  const path = await promptText({
-    title: "New file",
-    label: folder ? `File name, in ${folder}/` : "File name (it can include folders, like lib/noise.easl)",
-    value: inside(folder),
+  const name = await promptText({
+    title: folder ? `New file in ${folder}/` : "New file",
+    label: "File name (it can include folders, like lib/noise.easl)",
+    value: "",
     confirm: "Add file",
-    validate: (path) => filePathProblem(path),
+    validate: (name) => filePathProblem(`${inside(folder)}${name}`),
   });
-  if (!path) return;
+  if (!name) return;
+  const path = `${inside(folder)}${name}`;
   doc.files.push({ path, text: "" });
   doc.folders = doc.folders.filter((f) => !path.startsWith(`${f}/`));
   documentChanged([path]);
@@ -644,15 +648,15 @@ async function addFile(folder = "") {
 }
 
 async function addFolder(parent = "") {
-  const path = await promptText({
-    title: "New folder",
-    label: parent ? `Folder name, in ${parent}/` : "Folder name",
-    value: inside(parent),
+  const name = await promptText({
+    title: parent ? `New folder in ${parent}/` : "New folder",
+    label: "Folder name",
+    value: "",
     confirm: "Add folder",
-    validate: (path) => folderPathProblem(path.replace(/\/+$/, "")),
+    validate: (name) => folderPathProblem(`${inside(parent)}${name.replace(/\/+$/, "")}`),
   });
-  if (!path) return;
-  doc.folders.push(path.replace(/\/+$/, ""));
+  if (!name) return;
+  doc.folders.push(`${inside(parent)}${name.replace(/\/+$/, "")}`);
   doc.persist();
   renderFiles();
 }
@@ -702,6 +706,60 @@ async function renameFolder(folder) {
   doc.folders = doc.folders.map((f) =>
     f === folder ? target : f.startsWith(prefix) ? `${target}/${f.slice(prefix.length)}` : f,
   );
+  documentChanged();
+  if (activePath) showFile(activePath);
+  else renderFiles();
+}
+
+const parentOf = (path) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
+const baseName = (path) => path.slice(path.lastIndexOf("/") + 1);
+
+/**
+ * Moves a file or folder dragged in the explorer to `target`: before or
+ * after a file or folder (into the folder holding it), into a folder (at
+ * its end), or, when `target` is null, to the end of the top level. The
+ * sketch's file order follows, so it's saved too.
+ */
+function moveInTree(path, isFolder, target) {
+  const folder =
+    target === null ? "" : target.where === "into" ? target.path : parentOf(target.path);
+  const moved = `${inside(folder)}${baseName(path)}`;
+  if (isFolder && (folder === path || folder.startsWith(`${path}/`))) return;
+  if (moved !== path && (doc.file(moved) || allFolders().has(moved))) {
+    toast(`There's already a file or folder named ${moved}.`, "error");
+    return;
+  }
+  // The files moving (a folder's, in their order), renamed.
+  const prefix = `${path}/`;
+  const movedFiles = doc.files.filter((file) =>
+    isFolder ? file.path.startsWith(prefix) : file.path === path,
+  );
+  const wasEmptyFolder = isFolder && movedFiles.length === 0;
+  const rename = (from) => (isFolder ? `${moved}/${from.slice(prefix.length)}` : moved);
+  for (const file of movedFiles) {
+    if (file.path !== rename(file.path)) moveFile(file.path, rename(file.path));
+  }
+  if (isFolder) {
+    doc.folders = doc.folders.map((f) =>
+      f === path ? moved : f.startsWith(prefix) ? `${moved}/${f.slice(prefix.length)}` : f,
+    );
+  }
+  // The folder they left stays, even if it's empty now.
+  const left = parentOf(path);
+  if (left && left !== folder && !allFolders().has(left)) doc.folders.push(left);
+  // Their place in the order.
+  const rest = doc.files.filter((file) => !movedFiles.includes(file));
+  let index = rest.length;
+  if (target !== null && !wasEmptyFolder) {
+    const within = (file) =>
+      target.folder ? file.path.startsWith(`${target.path}/`) : file.path === target.path;
+    const first = rest.findIndex(within);
+    const last = rest.findLastIndex(within);
+    if (target.where === "before" && first >= 0) index = first;
+    else if (first >= 0) index = last + 1;
+  }
+  rest.splice(index, 0, ...movedFiles);
+  doc.files = rest;
   documentChanged();
   if (activePath) showFile(activePath);
   else renderFiles();

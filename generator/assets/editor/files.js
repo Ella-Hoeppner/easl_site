@@ -2,23 +2,37 @@
 // sketch's folders and files, beside the editor, collapsible) and the tabs
 // above the editor, one per file that's open. Opening a file from the
 // explorer adds its tab; closing a tab leaves the file in the sketch.
+//
+// The tree shows the sketch's files in their order (a folder where its
+// first file is), and rows can be dragged: onto the top or bottom half of a
+// file to go before or after it (in its folder), onto the middle of a
+// folder to go in it, and onto the space below the rows to go to the top
+// level, at the end.
 
 import { el, storage } from "./util.js?v=__VERSION__";
 
-/** The folders and files under `prefix` (a folder path ending in `/`, or
- * ""), as `{folders: [name], files: [name]}`, each sorted. */
+/** The folders and files directly under `prefix` (a folder path ending in
+ * `/`, or ""), in the order of `paths` (a folder where its first file is;
+ * folders holding no file, `folders`, after the files), as
+ * `[{name, folder}]`. */
 function children(paths, folders, prefix) {
-  const childFolders = new Set();
-  const childFiles = [];
+  const entries = [];
+  const seenFolders = new Set();
   for (const path of [...paths, ...folders.map((folder) => `${folder}/`)]) {
     if (!path.startsWith(prefix)) continue;
     const rest = path.slice(prefix.length);
     const slash = rest.indexOf("/");
-    if (slash >= 0) childFolders.add(rest.slice(0, slash));
-    else if (rest) childFiles.push(rest);
+    if (slash >= 0) {
+      const name = rest.slice(0, slash);
+      if (!seenFolders.has(name)) {
+        seenFolders.add(name);
+        entries.push({ name, folder: true });
+      }
+    } else if (rest) {
+      entries.push({ name: rest, folder: false });
+    }
   }
-  const byName = (a, b) => a.localeCompare(b);
-  return { folders: [...childFolders].sort(byName), files: childFiles.sort(byName) };
+  return entries;
 }
 
 /** Every folder holding a file in `paths`, plus `folders`. */
@@ -38,7 +52,10 @@ export class FileExplorer {
    * `host` is the explorer's element. `actions` has `open(path)`,
    * `newFile(folder)`, `newFolder(folder)`, `rename(path, isFolder)`,
    * `remove(path, isFolder)` (where `folder` is a folder path, or "" for
-   * the top level), and `refresh()`, which renders the explorer again.
+   * the top level), `move(path, isFolder, target)` (a dragged row dropped
+   * on `target`, `{path, folder, where}` with `where` "before", "after",
+   * or "into", or null for the end of the top level), and `refresh()`,
+   * which renders the explorer again.
    */
   constructor(host, actions) {
     this.host = host;
@@ -46,6 +63,25 @@ export class FileExplorer {
     // Folders the visitor has collapsed, by path.
     this.collapsed = new Set();
     this.list = el("ul", { className: "tree", role: "tree", ariaLabel: "Files" });
+    // The row being dragged, as `{path, folder}`.
+    this.dragging = null;
+    // Dropping below the rows moves to the top level.
+    host.addEventListener("dragover", (event) => {
+      if (!this.dragging || event.target.closest(".tree-row")) return;
+      event.preventDefault();
+      this.clearDropMarks();
+      this.list.classList.add("drop-end");
+    });
+    host.addEventListener("dragleave", (event) => {
+      if (!host.contains(event.relatedTarget)) this.clearDropMarks();
+    });
+    host.addEventListener("drop", (event) => {
+      if (!this.dragging || event.target.closest(".tree-row")) return;
+      event.preventDefault();
+      const dragged = this.dragging;
+      this.endDrag();
+      this.actions.move(dragged.path, dragged.folder, null);
+    });
     host.replaceChildren(
       el("div", { className: "explorer-head" },
         el("span", { className: "explorer-title" }, "Files"),
@@ -65,26 +101,81 @@ export class FileExplorer {
     const paths = doc.files.map((file) => file.path);
     const rows = [];
     const walk = (prefix, depth) => {
-      const { folders, files } = children(paths, doc.folders, prefix);
-      for (const name of folders) {
+      for (const { name, folder } of children(paths, doc.folders, prefix)) {
         const path = `${prefix}${name}`;
-        const open = !this.collapsed.has(path);
-        rows.push(this.folderRow(path, name, depth, open));
-        if (open) walk(`${path}/`, depth + 1);
-      }
-      for (const name of files) {
-        const path = `${prefix}${name}`;
-        rows.push(this.fileRow(path, name, depth, {
-          active: path === active,
-          problems: withProblems.has(path),
-          entries: withEntries.has(path),
-        }));
+        if (folder) {
+          const open = !this.collapsed.has(path);
+          rows.push(this.draggable(this.folderRow(path, name, depth, open), path, true));
+          if (open) walk(`${path}/`, depth + 1);
+        } else {
+          rows.push(this.draggable(this.fileRow(path, name, depth, {
+            active: path === active,
+            problems: withProblems.has(path),
+            entries: withEntries.has(path),
+          }), path, false));
+        }
       }
     };
     walk("", 0);
     // Without folders, files need no room for a folder's chevron.
     this.list.classList.toggle("flat", allFolders(paths, doc.folders).length === 0);
     this.list.replaceChildren(...rows);
+  }
+
+  /** Makes `row` (the row of `path`) draggable, and a place to drop
+   * others. */
+  draggable(row, path, folder) {
+    row.draggable = true;
+    row.addEventListener("dragstart", (event) => {
+      this.dragging = { path, folder };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", path);
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => this.endDrag());
+    row.addEventListener("dragover", (event) => {
+      const where = this.dropPlace(event, row, path, folder);
+      if (!where) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      this.clearDropMarks();
+      row.classList.add(`drop-${where}`);
+    });
+    row.addEventListener("drop", (event) => {
+      const where = this.dropPlace(event, row, path, folder);
+      if (!where) return;
+      event.preventDefault();
+      const dragged = this.dragging;
+      this.endDrag();
+      this.actions.move(dragged.path, dragged.folder, { path, folder, where });
+    });
+    return row;
+  }
+
+  /** Where a row being dragged over `row` would go: "before", "after", or
+   * (on a folder's middle) "into" it, by the pointer's height on the row;
+   * or null where it can't go (onto itself, or into its own folder). */
+  dropPlace(event, row, path, folder) {
+    const dragged = this.dragging;
+    if (!dragged || dragged.path === path) return null;
+    if (dragged.folder && path.startsWith(`${dragged.path}/`)) return null;
+    const box = row.getBoundingClientRect();
+    const height = (event.clientY - box.top) / box.height;
+    if (folder) return height < 0.25 ? "before" : height > 0.75 ? "after" : "into";
+    return height < 0.5 ? "before" : "after";
+  }
+
+  clearDropMarks() {
+    this.list.classList.remove("drop-end");
+    for (const marked of this.list.querySelectorAll(".drop-before, .drop-after, .drop-into")) {
+      marked.classList.remove("drop-before", "drop-after", "drop-into");
+    }
+  }
+
+  endDrag() {
+    this.dragging = null;
+    this.clearDropMarks();
+    this.list.querySelector(".dragging")?.classList.remove("dragging");
   }
 
   folderRow(path, name, depth, open) {

@@ -714,6 +714,28 @@ body.explorer-closed.explorer-peeking .explorer {
   font-size: 0.55rem;
 }
 
+/* Dragging rows: where a dropped row would go. */
+.tree-row.dragging {
+  opacity: 0.45;
+}
+
+.tree-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tree-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tree-row.drop-into {
+  --row-bg: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tree.drop-end {
+  box-shadow: 0 2px 0 var(--accent);
+}
+
 .tree-row.folder .tree-label {
   color: var(--text-dim);
 }
