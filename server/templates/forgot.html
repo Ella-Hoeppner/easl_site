@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Reset your password — easl{% endblock %}
+{% block page_class %} narrow{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Reset your password</h1>
+  <p class="dim">Enter your account’s email address and we’ll send you a link to choose a new password.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form class="stack" method="post" action="/forgot">
+    <label>Email
+      <input type="email" name="email" value="{{ email }}" autocomplete="email" required autofocus>
+    </label>
+    <button type="submit" class="primary">Send the link</button>
+  </form>
+  <p class="links"><a href="/login">Back to sign in</a></p>
+</section>
+{% endblock %}

@@ -1,16 +1,22 @@
-//! The playground (`playground.html`): an editor where visitors write easl
-//! and run it on a canvas beside it.
+//! The editor's files: the scripts and styles of the page where visitors
+//! write easl sketches and run them (`assets/playground/`), its language
+//! support, and the examples it offers.
 //!
-//! The page runs each program with the web runtime in a fresh iframe
-//! (`assets/playground/runner.html`), so stopping or rerunning a program
-//! frees everything it held. The editor is Monaco, loaded from a CDN, with
-//! easl's language support compiled to WebAssembly from
-//! `playground/analysis` and run in a worker (`analysis-worker.js`):
-//! diagnostics, hover, go-to-definition, completion, formatting, and
-//! structural editing.
+//! The page itself is rendered by the site's server (`server/templates/
+//! editor.html`), for the playground's examples (`/playground`), a new
+//! sketch (`/new`), and saved sketches (`/s/<id>`). It runs each program
+//! with the web runtime in a fresh iframe (`assets/playground/runner.html`),
+//! so stopping or rerunning a program frees everything it held. The editor
+//! is Monaco, loaded from a CDN, with easl's language support compiled to
+//! WebAssembly from `playground/analysis` and run in a worker
+//! (`analysis-worker.js`): diagnostics, hover, go-to-definition,
+//! completion, formatting, and structural editing.
 //!
-//! The examples it offers are the landing page's program, the files in
-//! `pages/playground/`, and every live preview's program.
+//! The examples are the landing page's program, the files in
+//! `pages/playground/`, and every live preview's program; the generator
+//! writes them, with the program a new sketch starts from, to
+//! `playground/examples.json`, and the build's version and Monaco's to
+//! `playground/manifest.json`, for the server.
 
 use std::{
   fs,
@@ -26,8 +32,9 @@ use crate::{landing::RUNTIME_DIR, nested_build};
 /// Where the playground's files go, relative to the site root.
 pub const PLAYGROUND_DIR: &str = "playground";
 
-/// The output page, relative to the site root.
-pub const PLAYGROUND_PAGE: &str = "playground.html";
+/// The page showing the examples, relative to the site root (a route of the
+/// site's server).
+pub const PLAYGROUND_PAGE: &str = "playground";
 
 /// The analysis crate, relative to the generator's manifest directory.
 const ANALYSIS_CRATE_PATH: &str = "../playground/analysis";
@@ -60,10 +67,26 @@ const MONACO_VERSION: &str = "0.52.2";
 
 /// The page's own scripts and styles, copied into `PLAYGROUND_DIR`.
 const ASSETS: &[(&str, &str)] = &[
+  ("editor.js", include_str!("../assets/playground/editor.js")),
   (
-    "playground.js",
-    include_str!("../assets/playground/playground.js"),
+    "documents.js",
+    include_str!("../assets/playground/documents.js"),
   ),
+  ("api.js", include_str!("../assets/playground/api.js")),
+  (
+    "analysis.js",
+    include_str!("../assets/playground/analysis.js"),
+  ),
+  (
+    "features.js",
+    include_str!("../assets/playground/features.js"),
+  ),
+  ("files.js", include_str!("../assets/playground/files.js")),
+  ("menu.js", include_str!("../assets/playground/menu.js")),
+  ("run.js", include_str!("../assets/playground/run.js")),
+  ("social.js", include_str!("../assets/playground/social.js")),
+  ("layout.js", include_str!("../assets/playground/layout.js")),
+  ("util.js", include_str!("../assets/playground/util.js")),
   (
     "playground.css",
     include_str!("../assets/playground/playground.css"),
@@ -281,6 +304,7 @@ pub fn generate(
   let examples_json = json!({
     "default": default_example,
     "newSketch": NEW_SKETCH,
+    "version": version,
     "examples": examples
       .iter()
       .map(|example| json!({
@@ -291,16 +315,11 @@ pub fn generate(
       }))
       .collect::<Vec<_>>(),
   })
-  .to_string()
-  // The JSON sits in a <script> element, which a literal "</" could end.
-  .replace("</", "<\\/");
+  .to_string();
+  fs::write(dir.join("examples.json"), examples_json).unwrap();
   fs::write(
-    site_dir.join(PLAYGROUND_PAGE),
-    include_str!("../assets/playground/playground.html")
-      .replace("__MONACO_VERSION__", MONACO_VERSION)
-      .replace("__PLAYGROUND__", PLAYGROUND_DIR)
-      .replace("__VERSION__", &version)
-      .replace("__EXAMPLES__", &examples_json),
+    dir.join("manifest.json"),
+    json!({ "version": version, "monaco_version": MONACO_VERSION }).to_string(),
   )
   .unwrap();
 }

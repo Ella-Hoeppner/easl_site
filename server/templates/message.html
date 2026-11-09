@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — easl{% endblock %}
+{% block page_class %} narrow{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>{{ title }}</h1>
+  <p>{{ message }}</p>
+  {% if link %}<p><a class="button primary" href="{{ link }}">{{ link_text }}</a></p>{% endif %}
+</section>
+{% endblock %}

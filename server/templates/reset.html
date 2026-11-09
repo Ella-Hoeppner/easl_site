@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Choose a new password — easl{% endblock %}
+{% block page_class %} narrow{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Choose a new password</h1>
+  <p class="dim">This signs you out everywhere else.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form class="stack" method="post" action="/reset/{{ token }}">
+    <label>New password
+      <input type="password" name="password" autocomplete="new-password" minlength="10" maxlength="256" required autofocus>
+      <span class="hint">At least 10 characters.</span>
+    </label>
+    <label>New password again
+      <input type="password" name="confirm" autocomplete="new-password" minlength="10" maxlength="256" required>
+    </label>
+    <button type="submit" class="primary">Set the password</button>
+  </form>
+</section>
+{% endblock %}

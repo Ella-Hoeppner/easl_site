@@ -1,18 +1,18 @@
 //! The playground editor's language support, for the browser: what easl_lsp
-//! gives VS Code, for one document. The page runs this in a worker, so a
+//! gives VS Code, for the files of one sketch. The page runs this in a worker, so a
 //! slow (or stuck) compilation never freezes the editor.
 //!
 //! Most of the work is easl_lsp's own code, included unchanged from the
 //! sibling `easl_lsp` repository: positions (`source.rs`), semantic tokens
 //! and identifiers (`syntax.rs`), completion candidates (`completion.rs`),
 //! and structural edits (`structural.rs`). `analysis.rs` is its analysis
-//! for a single document. The request handling mirrors easl_lsp's
-//! `server.rs`.
+//! over the sketch's files in place of a filesystem. The request handling
+//! mirrors easl_lsp's `server.rs`.
 //!
 //! Positions are LSP positions: zero-based lines and UTF-16 columns.
 //! Results are JSON strings.
 
-use std::{cell::RefCell, ops::Range, panic};
+use std::{cell::RefCell, collections::HashMap, ops::Range, panic};
 
 use easl::{format::format_document, parse::parse_easl};
 use js_sys::{Function, Reflect};
@@ -38,7 +38,7 @@ mod structural;
 
 mod analysis;
 
-use analysis::{Analysis, analyze as analyze_text};
+use analysis::{Analysis, Location, analyze as analyze_file, cpu_entries};
 use source::SourceText;
 
 /// The last analysis, which hover and go-to-definition answer from (the
@@ -78,11 +78,20 @@ fn range_json(range: LspRange) -> Value {
   ])
 }
 
-/// Compiles `text`, keeping the result for hover and go-to-definition, and
-/// returns its diagnostics: `[{range, message, related: [range]}]`.
+fn location_json(location: &Location) -> Value {
+  json!({ "path": location.path, "range": range_json(location.range) })
+}
+
+/// Compiles the file at `path` among the sketch's files (`files_json`, an
+/// object of each file's text by path), keeping the result for hover and
+/// go-to-definition, and returns its diagnostics:
+/// `[{range, message, related: [{path, range}]}]`.
 #[wasm_bindgen]
-pub fn analyze(text: String) -> String {
-  let analysis = analyze_text(&text);
+pub fn analyze(path: String, files_json: String) -> String {
+  let files: HashMap<String, String> =
+    serde_json::from_str(&files_json).unwrap_or_default();
+  let text = files.get(&path).cloned().unwrap_or_default();
+  let analysis = analyze_file(&path, &files);
   let diagnostics: Vec<Value> = analysis
     .diagnostics
     .iter()
@@ -90,7 +99,7 @@ pub fn analyze(text: String) -> String {
       json!({
         "range": range_json(diagnostic.range),
         "message": diagnostic.message,
-        "related": diagnostic.related.iter().copied().map(range_json)
+        "related": diagnostic.related.iter().map(location_json)
           .collect::<Vec<_>>(),
       })
     })
@@ -175,19 +184,15 @@ pub fn hover(line: u32, character: u32) -> String {
   })
 }
 
-/// Where the name at a position is defined: `[range]` (several for an
-/// overloaded function), or null.
+/// Where the name at a position is defined: `[{path, range}]` (several for
+/// an overloaded function), or null.
 #[wasm_bindgen]
 pub fn definition(line: u32, character: u32) -> String {
   at_position(line, character, |analyzed, offset| {
     let reference =
       innermost(&analyzed.analysis.references, offset, |r| &r.span)?;
     Some(Value::Array(
-      reference
-        .definitions
-        .iter()
-        .map(|span| range_json(analyzed.source.range(span)))
-        .collect(),
+      reference.definitions.iter().map(location_json).collect(),
     ))
   })
 }
@@ -235,6 +240,22 @@ pub fn completions(text: String, line: u32, character: u32) -> String {
           "sortText": item.sort_text,
           "range": range_json(replaced),
         })
+      })
+      .collect(),
+  )
+  .to_string()
+}
+
+/// The `@cpu` entry points defined in `text`: `[{name, range}]`, where
+/// `range` is the `@cpu` annotation's.
+#[wasm_bindgen(js_name = cpuEntries)]
+pub fn cpu_entries_json(text: String) -> String {
+  let source = SourceText::new(text);
+  Value::Array(
+    cpu_entries(source.text())
+      .into_iter()
+      .map(|(name, span)| {
+        json!({ "name": name, "range": range_json(source.range(&span)) })
       })
       .collect(),
   )

@@ -67,28 +67,86 @@
       const loaded = load();
 
       /**
-       * Starts `source` on this page's canvas and returns the program
-       * (`pause`, `resume`, `paused`, `finished`). `onPrint` gets each line
-       * the program prints, and `onAudioError` each error from the audio
-       * thread (which stops the audio, not the program).
+       * Starts a program on this page's canvas and returns it (`pause`,
+       * `resume`, `paused`, `finished`): `files` as `[{path, source}]`,
+       * `mainPath` the file holding the `@cpu` entry point `entry`.
+       * `onPrint` gets each line the program prints, and `onAudioError`
+       * each error from the audio thread (which stops the audio, not the
+       * program).
        */
-      window.runEasl = async (source, onPrint, onAudioError) => {
+      window.runEasl = async ({ files, mainPath, entry, onPrint, onAudioError }) => {
         const { web, start, audioModule } = await loaded;
         const canvas = document.getElementById("canvas");
         return start(
           canvas,
-          "playground.easl",
-          ["playground.easl"],
-          [source],
+          mainPath,
+          files.map((file) => file.path),
+          files.map((file) => file.source),
           {
             module: audioModule,
             workletUrl: new URL("easl-audio-worklet.js?v=__VERSION__", runtime).href,
             startMidi: () => listenToMidi(web),
             onPrint,
             onAudioError,
+            entry,
           },
         );
       };
+
+      // A picture of the canvas, for a sketch's thumbnail. A WebGPU canvas
+      // can only be read while its frame's texture is current, before the
+      // browser presents it, so the picture is taken as the program submits
+      // the work that draws into that texture (the first submit after it
+      // asks for the canvas's texture).
+      const captures = [];
+      let drawingFrame = false;
+      if (window.GPUCanvasContext && window.GPUQueue) {
+        const getCurrentTexture = GPUCanvasContext.prototype.getCurrentTexture;
+        GPUCanvasContext.prototype.getCurrentTexture = function () {
+          drawingFrame = true;
+          return getCurrentTexture.call(this);
+        };
+        const submit = GPUQueue.prototype.submit;
+        GPUQueue.prototype.submit = function (commandBuffers) {
+          const result = submit.call(this, commandBuffers);
+          if (drawingFrame) {
+            drawingFrame = false;
+            if (captures.length > 0) takePictures();
+          }
+          return result;
+        };
+      }
+
+      function takePictures() {
+        const canvas = document.getElementById("canvas");
+        for (const { width, resolve } of captures.splice(0)) {
+          if (!canvas.width || !canvas.height) {
+            resolve(null);
+            continue;
+          }
+          const scale = Math.min(1, width / canvas.width);
+          const picture = document.createElement("canvas");
+          picture.width = Math.round(canvas.width * scale);
+          picture.height = Math.round(canvas.height * scale);
+          picture.getContext("2d").drawImage(canvas, 0, 0, picture.width, picture.height);
+          picture.toBlob(resolve, "image/webp", 0.85);
+        }
+      }
+
+      /** Resolves to a picture of the next frame shown (a Blob), at most
+       * `width` wide. */
+      window.captureFrame = (width) =>
+        new Promise((resolve) => {
+          captures.push({ width, resolve });
+          // A program that has stopped drawing never asks for a frame.
+          setTimeout(() => {
+            const index = captures.findIndex((capture) => capture.resolve === resolve);
+            if (index >= 0) {
+              captures.splice(index, 1);
+              resolve(null);
+            }
+          }, 2000);
+        });
 
       // Clicking the canvas gives the program the keyboard.
       document.addEventListener("pointerdown", () =>

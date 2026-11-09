@@ -55,6 +55,10 @@ const PAGES: &[PageSpec] = &[
   PageSpec { source: "reference/cpu-builtins.md", nav_title: "CPU builtins", section: "Reference", playground_menu: None },
 ];
 
+/// The gallery of everyone's published sketches (a route of the site's
+/// server), relative to the site root.
+const EXPLORE_PAGE: &str = "explore";
+
 /// The sidebar section the playground's link closes.
 const PLAYGROUND_SECTION: &str = "Walkthroughs";
 
@@ -522,7 +526,8 @@ fn wrap_in_template(
     if spec.section != current_section {
       if current_section == PLAYGROUND_SECTION {
         nav.push_str(&format!(
-          "<li><a href=\"{prefix}{}\">Playground</a></li>\n",
+          "<li><a href=\"{prefix}{}\">Playground</a></li>\n\
+           <li><a href=\"{prefix}{EXPLORE_PAGE}\">Explore sketches</a></li>\n",
           playground::PLAYGROUND_PAGE
         ));
       }

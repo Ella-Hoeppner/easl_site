@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Settings — easl{% endblock %}
+{% block page_class %} medium{% endblock %}
+{% macro section_error(name) %}{% if error_section == name %}<p class="error" role="alert">{{ error }}</p>{% endif %}{% endmacro %}
+{% block content %}
+<h1>Settings</h1>
+{% if saved == "profile" %}<p class="success" role="status">Your profile is saved.</p>
+{% elif saved == "email" %}<p class="success" role="status">Your email address changed. We sent a verification link to it.</p>
+{% elif saved == "password" %}<p class="success" role="status">Your password changed. Other devices have been signed out.</p>
+{% endif %}
+
+<section class="panel" id="profile">
+  <h2>Profile</h2>
+  {{ section_error("profile") }}
+  <form class="stack" method="post" action="/settings/profile">
+    <label>Display name
+      <input name="display_name" value="{{ display_name }}" maxlength="50" placeholder="{{ me.username }}">
+      <span class="hint">Shown instead of your username. Leave empty to use your username.</span>
+    </label>
+    <label>Bio
+      <textarea name="bio" rows="4" maxlength="500">{{ bio }}</textarea>
+      <span class="hint">Up to 500 characters. Links work.</span>
+    </label>
+    <div class="row"><button type="submit" class="primary">Save profile</button> <a href="/u/{{ me.username }}">View your profile</a></div>
+  </form>
+</section>
+
+<section class="panel" id="email">
+  <h2>Email</h2>
+  <p>Your address is <strong>{{ email }}</strong>
+    {% if email_verified %}<span class="badge badge-ok">verified</span>{% else %}<span class="badge badge-unlisted">not verified</span>{% endif %}</p>
+  {{ section_error("email") }}
+  {% if not email_verified %}
+  <form method="post" action="/settings/verification" class="row">
+    <button type="submit">Resend the verification email</button>
+  </form>
+  {% endif %}
+  <form class="stack" method="post" action="/settings/email">
+    <label>New email address
+      <input type="email" name="email" value="{{ new_email }}" autocomplete="email" maxlength="254" required>
+    </label>
+    <label>Current password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <div class="row"><button type="submit">Change email</button></div>
+  </form>
+</section>
+
+<section class="panel" id="password">
+  <h2>Password</h2>
+  {{ section_error("password") }}
+  <form class="stack" method="post" action="/settings/password">
+    <label>Current password
+      <input type="password" name="current" autocomplete="current-password" required>
+    </label>
+    <label>New password
+      <input type="password" name="password" autocomplete="new-password" minlength="10" maxlength="256" required>
+      <span class="hint">At least 10 characters. Changing it signs out your other devices.</span>
+    </label>
+    <label>New password again
+      <input type="password" name="confirm" autocomplete="new-password" minlength="10" maxlength="256" required>
+    </label>
+    <div class="row"><button type="submit">Change password</button></div>
+  </form>
+</section>
+
+<section class="panel danger-zone" id="delete">
+  <h2>Delete your account</h2>
+  <p>This deletes your account, sketches, playlists, comments, and likes for good.</p>
+  {{ section_error("delete") }}
+  <form class="stack" method="post" action="/settings/delete">
+    <label>Password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <label class="check"><input type="checkbox" name="confirm" value="yes" required> I understand this can’t be undone.</label>
+    <div class="row"><button type="submit" class="danger">Delete my account</button></div>
+  </form>
+</section>
+{% endblock %}

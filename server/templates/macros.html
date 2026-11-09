@@ -1,0 +1,33 @@
+{% macro visibility_badge(visibility, hidden=false) -%}
+{% if hidden %}<span class="badge badge-hidden" title="Hidden by a moderator">hidden</span>{% endif -%}
+{% if visibility != "public" %}<span class="badge badge-{{ visibility }}">{{ visibility }}</span>{% endif -%}
+{%- endmacro %}
+
+{% macro sketch_card(s, show_visibility=false) -%}
+<article class="card">
+  <a class="card-thumb" href="{{ s.url }}" tabindex="-1" aria-hidden="true">
+    <img src="{{ s.thumbnail_url }}" alt="" loading="lazy" width="640" height="360">
+  </a>
+  <div class="card-body">
+    <h3 class="card-title"><a href="{{ s.url }}">{{ s.title }}</a></h3>
+    <div class="card-meta">
+      <a class="author" href="/u/{{ s.owner.username }}">
+        <img class="avatar avatar-small" src="{{ s.owner.avatar_url }}" alt="" width="20" height="20" loading="lazy">
+        <span>{{ s.owner.display_name }}</span>
+      </a>
+      {% if show_visibility %}{{ visibility_badge(s.visibility, s.hidden) }}{% endif %}
+      <span class="likes{% if s.liked %} liked{% endif %}" title="{{ s.like_count }} {{ 'like' if s.like_count == 1 else 'likes' }}"><span aria-hidden="true">♥</span> {{ s.like_count }}</span>
+    </div>
+  </div>
+</article>
+{%- endmacro %}
+
+{% macro pagination(pages) -%}
+{% if pages.prev or pages.next %}
+<nav class="pagination" aria-label="Pages">
+  {% if pages.prev %}<a class="button" href="{{ pages.prev }}" rel="prev">← Newer</a>{% else %}<span></span>{% endif %}
+  <span class="page-number">Page {{ pages.number }}</span>
+  {% if pages.next %}<a class="button" href="{{ pages.next }}" rel="next">Older →</a>{% else %}<span></span>{% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}

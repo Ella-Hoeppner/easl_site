@@ -21,7 +21,9 @@ const ready = init({
 const parse = (json) => JSON.parse(json);
 
 const methods = {
-  analyze: (text) => parse(easl.analyze(text)),
+  // `files` is an object of every file's text by path.
+  analyze: (path, files) => parse(easl.analyze(path, JSON.stringify(files))),
+  cpuEntries: (text) => parse(easl.cpuEntries(text)),
   hover: (line, character) => parse(easl.hover(line, character)),
   definition: (line, character) => parse(easl.definition(line, character)),
   completions: (text, line, character) =>

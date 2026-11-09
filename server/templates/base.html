@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}easl{% endblock %}</title>
+<meta name="description" content="{% block description %}easl is a Lisp-like shader language. Write sketches in your browser, run them live, and share them.{% endblock %}">
+{% block meta %}{% endblock %}
+<link rel="stylesheet" href="{{ static('app.css') }}">
+<script type="module" src="{{ static('app.js') }}"></script>
+</head>
+<body>
+<header class="site-header">
+  <a class="wordmark" href="/">easl</a>
+  <nav class="site-nav" aria-label="Site">
+    <a href="/guide.html">Docs</a>
+    <a href="/explore"{% if path is startingwith("/explore") %} aria-current="page"{% endif %}>Explore</a>
+    <a href="/playground">Playground</a>
+    <a class="nav-new" href="/new">New sketch</a>
+  </nav>
+  <div class="account">
+    {% if me %}
+    <details class="user-menu">
+      <summary aria-label="Account menu">
+        <img class="avatar" src="{{ me.avatar_url }}" alt="" width="28" height="28">
+        <span class="user-name">{{ me.username }}</span>
+      </summary>
+      <div class="menu-panel">
+        <a href="/u/{{ me.username }}">Profile</a>
+        <a href="/settings">Settings</a>
+        {% if me.is_admin %}<a href="/admin">Moderation</a>{% endif %}
+        <form method="post" action="/logout"><button type="submit">Sign out</button></form>
+      </div>
+    </details>
+    {% else %}
+    <a href="{{ login_url }}">Sign in</a>
+    <a class="button primary" href="/signup">Sign up</a>
+    {% endif %}
+  </div>
+</header>
+{% if me and not me.email_verified and not hide_verify_banner %}
+<div class="banner">
+  <span>Verify your email address to publish, comment, and report.</span>
+  <form method="post" action="/settings/verification"><button type="submit" class="link-button">Resend the email</button></form>
+</div>
+{% endif %}
+<main class="page{% block page_class %}{% endblock %}">
+{% block content %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <a href="/guide.html">Docs</a>
+  <a href="/explore">Explore</a>
+  <a href="/playground">Playground</a>
+</footer>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

@@ -1,0 +1,29 @@
+//! The easl site's server: accounts, sketches, playlists, comments, and
+//! moderation, with server-rendered pages and a JSON API, in front of the
+//! generated static docs site. See the README for running and deploying it.
+
+pub mod api;
+pub mod app;
+pub mod assets;
+pub mod auth;
+pub mod avatar;
+pub mod comments;
+pub mod config;
+pub mod db;
+pub mod error;
+pub mod mail;
+pub mod pages;
+pub mod playlists;
+pub mod ratelimit;
+pub mod reports;
+pub mod security;
+pub mod seed;
+pub mod site;
+pub mod sketches;
+pub mod state;
+pub mod templates;
+pub mod text;
+pub mod tokens;
+pub mod users;
+pub mod validate;
+pub mod visibility;

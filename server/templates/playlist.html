@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}{{ playlist.title }} — easl{% endblock %}
+{% block description %}A playlist of easl sketches by {{ playlist.owner.display_name }}.{% endblock %}
+{% block content %}
+<section class="playlist-head">
+  <div>
+    <p class="eyebrow">Playlist {{ m.visibility_badge(playlist.visibility) }}</p>
+    <h1>{{ playlist.title }}</h1>
+    <p class="byline">
+      <a class="author" href="/u/{{ playlist.owner.username }}">
+        <img class="avatar avatar-small" src="{{ playlist.owner.avatar_url }}" alt="" width="20" height="20">
+        <span>{{ playlist.owner.display_name }}</span>
+      </a>
+      <span class="dim">· {{ playlist.items|length }} {{ "sketch" if playlist.items|length == 1 else "sketches" }} · updated {{ playlist.updated_at|ago }}</span>
+    </p>
+    {% if playlist.description %}<p class="description">{{ playlist.description|rich }}</p>{% endif %}
+  </div>
+  {% if play_url %}<a class="button primary play" href="{{ play_url }}">▶ Play</a>{% endif %}
+</section>
+
+{% if playlist.can_edit %}
+<details class="edit-panel">
+  <summary>Edit playlist</summary>
+  <form class="stack" data-api-form data-method="PUT" data-url="/api/playlists/{{ playlist.id }}">
+    <label>Title <input name="title" value="{{ playlist.title }}" maxlength="100" required></label>
+    <label>Description <textarea name="description" rows="3" maxlength="2000">{{ playlist.description }}</textarea></label>
+    <label>Visibility
+      <select name="visibility">
+        {% for v in ["private", "unlisted", "public"] %}
+        <option value="{{ v }}"{% if v == playlist.visibility %} selected{% endif %}>{{ v|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="hint">Unlisted playlists can be opened by anyone with the link but aren’t shown on your profile.</p>
+    <div class="row">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" class="danger" data-api="/api/playlists/{{ playlist.id }}" data-method="DELETE" data-confirm="Delete this playlist? The sketches in it aren’t affected." data-redirect="/u/{{ playlist.owner.username }}?tab=playlists">Delete playlist</button>
+    </div>
+  </form>
+</details>
+{% endif %}
+
+{% if playlist.items %}
+<ol class="playlist-items" data-playlist="{{ playlist.id }}">
+  {% for s in playlist.items %}
+  <li class="playlist-item" data-sketch="{{ s.id }}">
+    <a class="item-thumb" href="/s/{{ s.id }}?playlist={{ playlist.id }}" tabindex="-1" aria-hidden="true"><img src="{{ s.thumbnail_url }}" alt="" loading="lazy" width="640" height="360"></a>
+    <div class="item-info">
+      <a class="item-title" href="/s/{{ s.id }}?playlist={{ playlist.id }}">{{ s.title }}</a>
+      <span class="dim">by <a href="/u/{{ s.owner.username }}">{{ s.owner.display_name }}</a> · ♥ {{ s.like_count }}</span>
+    </div>
+    {% if playlist.can_edit %}
+    <div class="item-actions">
+      <button type="button" class="small" data-move="up" aria-label="Move up">↑</button>
+      <button type="button" class="small" data-move="down" aria-label="Move down">↓</button>
+      <button type="button" class="small" data-api="/api/playlists/{{ playlist.id }}/items/{{ s.id }}" data-method="DELETE" aria-label="Remove from playlist">Remove</button>
+    </div>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<div class="empty"><p>This playlist is empty.{% if playlist.can_edit %} Add sketches to it from a sketch’s page.{% endif %}</p></div>
+{% endif %}
+{% endblock %}

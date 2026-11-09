@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sign up — easl{% endblock %}
+{% block page_class %} narrow{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Create an account</h1>
+  <p class="dim">Save your sketches, publish them, and follow what others make.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form class="stack" method="post" action="/signup">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>Username
+      <input name="username" value="{{ username }}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="24" pattern="[A-Za-z0-9_\-]+" required autofocus>
+      <span class="hint">3–24 letters, digits, “_”, or “-”. It’s your address: /u/<em>name</em>.</span>
+    </label>
+    <label>Email
+      <input type="email" name="email" value="{{ email }}" autocomplete="email" maxlength="254" required>
+      <span class="hint">For verifying your account and resetting your password. Never shown.</span>
+    </label>
+    <label>Password
+      <input type="password" name="password" autocomplete="new-password" minlength="10" maxlength="256" required>
+      <span class="hint">At least 10 characters.</span>
+    </label>
+    <button type="submit" class="primary">Sign up</button>
+  </form>
+  <p class="links">Already have an account? <a href="/login?next={{ next|urlencode }}">Sign in</a></p>
+</section>
+{% endblock %}

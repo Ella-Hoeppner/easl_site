@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}{{ profile.display_name }} (@{{ profile.username }}) — easl{% endblock %}
+{% block description %}{{ profile.display_name }}’s sketches on easl.{% endblock %}
+{% block content %}
+<section class="profile-head">
+  <img class="avatar avatar-large" src="{{ profile.avatar_url }}" alt="" width="96" height="96">
+  <div class="profile-info">
+    <h1>{{ profile.display_name }}</h1>
+    <p class="handle">@{{ profile.username }}{% if profile.banned %} <span class="badge badge-hidden">banned</span>{% endif %}</p>
+    {% if profile.bio %}<p class="bio">{{ profile.bio|rich }}</p>{% endif %}
+    <p class="stats">
+      <span><strong>{{ sketch_count }}</strong> {{ "sketch" if sketch_count == 1 else "sketches" }}</span>
+      <span><strong>{{ likes_received }}</strong> {{ "like" if likes_received == 1 else "likes" }}</span>
+      <span>Joined {{ profile.created_at|month }}</span>
+    </p>
+  </div>
+  {% if own %}<a class="button" href="/settings">Edit profile</a>{% endif %}
+</section>
+<nav class="tabs" aria-label="Profile sections">
+  {% for t in tabs %}
+  <a href="{{ t.url }}"{% if t.current %} aria-current="page"{% endif %}>{{ t.label }}</a>
+  {% endfor %}
+</nav>
+{% if tab == "playlists" %}
+  {% if playlists %}
+  <ul class="playlist-list">
+    {% for p in playlists %}
+    <li>
+      <a class="playlist-link" href="/p/{{ p.id }}">{{ p.title }}</a>
+      {% if own %}{{ m.visibility_badge(p.visibility) }}{% endif %}
+      <span class="dim">{{ p.item_count }} {{ "sketch" if p.item_count == 1 else "sketches" }} · updated {{ p.updated_at|ago }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="empty"><p>{% if own %}You haven’t made any playlists yet. Add sketches to one from a sketch’s page.{% else %}No playlists yet.{% endif %}</p></div>
+  {% endif %}
+{% else %}
+  {% if sketches %}
+  <div class="grid">
+    {% for s in sketches %}{{ m.sketch_card(s, show_visibility=own) }}{% endfor %}
+  </div>
+  {{ m.pagination(pages) }}
+  {% else %}
+  <div class="empty">
+    {% if tab == "likes" %}
+    <p>{% if own %}Sketches you like show up here.{% else %}No liked sketches yet.{% endif %}</p>
+    {% elif own %}
+    <p>You haven’t made any sketches yet.</p>
+    <p><a class="button primary" href="/new">New sketch</a></p>
+    {% else %}
+    <p>No sketches yet.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

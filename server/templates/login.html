@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Sign in — easl{% endblock %}
+{% block page_class %} narrow{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Sign in</h1>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form class="stack" method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>Username or email
+      <input name="login" value="{{ login }}" autocomplete="username" autocapitalize="off" spellcheck="false" required autofocus>
+    </label>
+    <label>Password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit" class="primary">Sign in</button>
+  </form>
+  <p class="links"><a href="/forgot">Forgot your password?</a> · <a href="/signup?next={{ next|urlencode }}">Create an account</a></p>
+</section>
+{% endblock %}

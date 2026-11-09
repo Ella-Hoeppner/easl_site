@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Moderation — easl{% endblock %}
+{% block content %}
+<h1>Moderation</h1>
+
+<section class="panel">
+  <h2>Quick actions</h2>
+  <div class="admin-tools">
+    <form class="row" data-api-form data-method="POST" data-url="/api/admin/sketches/{id}/hide">
+      <label class="visually-hidden" for="hide-id">Sketch id</label>
+      <input id="hide-id" name="id" placeholder="Sketch id" required maxlength="8">
+      <button type="submit">Hide sketch</button>
+    </form>
+    <form class="row" data-api-form data-method="POST" data-url="/api/admin/sketches/{id}/unhide">
+      <label class="visually-hidden" for="unhide-id">Sketch id</label>
+      <input id="unhide-id" name="id" placeholder="Sketch id" required maxlength="8">
+      <button type="submit">Unhide sketch</button>
+    </form>
+    <form class="row" data-api-form data-method="POST" data-url="/api/admin/users/{username}/ban">
+      <label class="visually-hidden" for="ban-name">Username</label>
+      <input id="ban-name" name="username" placeholder="Username" required maxlength="24">
+      <button type="submit" class="danger">Ban user</button>
+    </form>
+    <form class="row" data-api-form data-method="POST" data-url="/api/admin/users/{username}/unban">
+      <label class="visually-hidden" for="unban-name">Username</label>
+      <input id="unban-name" name="username" placeholder="Username" required maxlength="24">
+      <button type="submit">Unban user</button>
+    </form>
+  </div>
+</section>
+
+<h2>Open reports ({{ reports|length }})</h2>
+{% if reports %}
+<ul class="reports">
+  {% for r in reports %}
+  <li class="panel report">
+    <p class="report-head">
+      <span class="badge">{{ r.kind }}</span>
+      {% if r.kind == "sketch" %}
+        {% if r.sketch_id %}<a href="/s/{{ r.sketch_id }}">{{ r.sketch_title }}</a>{% if r.sketch_hidden %} <span class="badge badge-hidden">hidden</span>{% endif %}{% else %}<span class="dim">sketch {{ r.target }} (deleted)</span>{% endif %}
+      {% elif r.kind == "comment" %}
+        {% if r.comment_id %}comment on <a href="/s/{{ r.sketch_id }}">{{ r.sketch_title }}</a>{% if r.comment_deleted %} <span class="badge badge-hidden">deleted</span>{% endif %}{% else %}<span class="dim">comment {{ r.target }} (deleted)</span>{% endif %}
+      {% else %}
+        {% if r.username %}<a href="/u/{{ r.username }}">@{{ r.username }}</a>{% else %}<span class="dim">user {{ r.target }} (deleted)</span>{% endif %}
+      {% endif %}
+      {% if r.username and r.kind != "user" %}<span class="dim">by <a href="/u/{{ r.username }}">@{{ r.username }}</a></span>{% endif %}
+      {% if r.user_banned %}<span class="badge badge-hidden">banned</span>{% endif %}
+    </p>
+    {% if r.comment_body %}<blockquote>{{ r.comment_body|rich }}</blockquote>{% endif %}
+    <p class="report-reason">{% if r.reason %}{{ r.reason|rich }}{% else %}<span class="dim">No reason given.</span>{% endif %}</p>
+    <p class="dim">Reported by {% if r.reporter_username %}<a href="/u/{{ r.reporter_username }}">@{{ r.reporter_username }}</a>{% else %}a deleted user{% endif %} {{ r.created_at|ago }}</p>
+    <div class="row">
+      <button type="button" class="primary" data-api="/api/admin/reports/{{ r.id }}/resolve" data-method="POST">Resolve</button>
+      {% if r.sketch_id %}
+        {% if r.sketch_hidden %}
+        <button type="button" data-api="/api/admin/sketches/{{ r.sketch_id }}/unhide" data-method="POST">Unhide sketch</button>
+        {% else %}
+        <button type="button" data-api="/api/admin/sketches/{{ r.sketch_id }}/hide" data-method="POST" data-confirm="Hide this sketch from everyone but its owner?">Hide sketch</button>
+        {% endif %}
+      {% endif %}
+      {% if r.comment_id and not r.comment_deleted %}
+      <button type="button" data-api="/api/comments/{{ r.comment_id }}" data-method="DELETE" data-confirm="Delete this comment?">Delete comment</button>
+      {% endif %}
+      {% if r.username %}
+        {% if r.user_banned %}
+        <button type="button" data-api="/api/admin/users/{{ r.username }}/unban" data-method="POST">Unban @{{ r.username }}</button>
+        {% else %}
+        <button type="button" class="danger" data-api="/api/admin/users/{{ r.username }}/ban" data-method="POST" data-confirm="Ban @{{ r.username }}? They’ll be signed out and their content unlisted.">Ban @{{ r.username }}</button>
+        {% endif %}
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty"><p>No open reports.</p></div>
+{% endif %}
+{% endblock %}
