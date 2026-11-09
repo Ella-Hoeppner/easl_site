@@ -39,58 +39,69 @@
         }
       }
 
-      // The runtime build that compiles programs from their sources
-      // (easl_web_compiler.js). Its audio worklet runs the plain runtime
-      // (easl_web.js), loaded only when a program starts audio. Before the
-      // web runtime was split in two, easl_web.js was the only build and
-      // compiled programs itself; a site built from such a runtime has no
-      // compiler build (the generator fills in which).
-      const HAS_COMPILER_BUILD = __HAS_COMPILER_BUILD__;
+      // The runtime's two builds, each loaded the first time it's needed: the
+      // one that compiles programs from their sources (easl_web_compiler.js),
+      // for a program the editor hasn't compiled yet, and the plain one
+      // (easl_web.js), which runs compiled programs and is much smaller, for
+      // one it has. The audio worklet always runs the plain build.
+      let compilerBuild = null;
+      let plainBuild = null;
+      let audioModule = null;
 
-      async function load() {
-        if (HAS_COMPILER_BUILD) {
+      function loadCompilerBuild() {
+        compilerBuild ??= (async () => {
           const web = await import(new URL("easl_web_compiler.js?v=__VERSION__", runtime));
           await web.default({ module_or_path: await compile("easl_web_compiler_bg.wasm") });
-          let audioModule = null;
-          return {
-            web,
-            start: web.startProgramFromSources,
-            audioModule: () => (audioModule ??= compile("easl_web_bg.wasm")),
-          };
-        }
-        const web = await import(new URL("easl_web.js?v=__VERSION__", runtime));
-        const module = await compile("easl_web_bg.wasm");
-        await web.default({ module_or_path: module });
-        return { web, start: web.startProgram, audioModule: module };
+          return web;
+        })();
+        return compilerBuild;
       }
 
-      const loaded = load();
+      function loadPlainBuild() {
+        plainBuild ??= (async () => {
+          const web = await import(new URL("easl_web.js?v=__VERSION__", runtime));
+          await web.default({ module_or_path: await compile("easl_web_bg.wasm") });
+          return web;
+        })();
+        return plainBuild;
+      }
 
       /**
-       * Starts a program on this page's canvas and returns it (`pause`,
-       * `resume`, `paused`, `finished`): `files` as `[{path, source}]`,
-       * `mainPath` the file holding the `@cpu` entry point `entry`.
-       * `onPrint` gets each line the program prints, and `onAudioError`
-       * each error from the audio thread (which stops the audio, not the
-       * program).
+       * Compiles a program without running it: `files` as `[{path, source}]`,
+       * `mainPath` the file holding its `@cpu` entry points. Resolves to
+       * `{bytes, entryPoints}` (see easl's `compileProgram`); a compile error
+       * rejects.
        */
-      window.runEasl = async ({ files, mainPath, entry, onPrint, onAudioError }) => {
-        const { web, start, audioModule } = await loaded;
-        const canvas = document.getElementById("canvas");
-        return start(
-          canvas,
+      window.compileEasl = async ({ files, mainPath }) => {
+        const web = await loadCompilerBuild();
+        const compiled = web.compileProgram(
           mainPath,
           files.map((file) => file.path),
           files.map((file) => file.source),
-          {
-            module: audioModule,
-            workletUrl: new URL("easl-audio-worklet.js?v=__VERSION__", runtime).href,
-            startMidi: () => listenToMidi(web),
-            onPrint,
-            onAudioError,
-            entry,
-          },
         );
+        const result = { bytes: compiled.bytes, entryPoints: compiled.entryPoints };
+        compiled.free();
+        return result;
+      };
+
+      /**
+       * Starts a compiled program (`bytes`, from `compileEasl`) on this
+       * page's canvas at its `@cpu` entry point `entry`, and returns it
+       * (`pause`, `resume`, `paused`, `finished`). `onPrint` gets each line
+       * the program prints, and `onAudioError` each error from the audio
+       * thread (which stops the audio, not the program).
+       */
+      window.runEasl = async ({ bytes, entry, onPrint, onAudioError }) => {
+        // The build this page already loaded to compile can run it too.
+        const web = await (compilerBuild ?? loadPlainBuild());
+        return web.startProgram(document.getElementById("canvas"), bytes, {
+          module: () => (audioModule ??= compile("easl_web_bg.wasm")),
+          workletUrl: new URL("easl-audio-worklet.js?v=__VERSION__", runtime).href,
+          startMidi: () => listenToMidi(web),
+          onPrint,
+          onAudioError,
+          entry,
+        });
       };
 
       // A picture of the canvas, for a sketch's thumbnail. A WebGPU canvas

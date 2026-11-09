@@ -52,9 +52,7 @@ const ANALYSIS_CRATE_PATH: &str = "../editor/analysis";
 const WEB_RUNTIME_DIST_PATH: &str = "../../easl/web/dist";
 
 /// The runtime build that compiles programs from their sources, which the
-/// editor runs programs with. A web runtime from before the runtime was
-/// split in two doesn't have it; its one build compiles programs itself, and
-/// the editor uses that instead (see `runner.html`).
+/// editor compiles programs with (see `runner.html`).
 const COMPILER_RUNTIME_FILES: [&str; 2] =
   ["easl_web_compiler.js", "easl_web_compiler_bg.wasm"];
 
@@ -330,13 +328,13 @@ pub fn generate(site_dir: &Path, examples: Vec<Example>) {
   );
   let runtime_dir = site_dir.join(RUNTIME_DIR);
   let dist = manifest_dir.join(WEB_RUNTIME_DIST_PATH);
-  let has_compiler_build = COMPILER_RUNTIME_FILES
-    .iter()
-    .all(|name| dist.join(name).exists());
-  if has_compiler_build {
-    for name in COMPILER_RUNTIME_FILES {
-      fs::copy(dist.join(name), runtime_dir.join(name)).unwrap();
-    }
+  for name in COMPILER_RUNTIME_FILES {
+    fs::copy(dist.join(name), runtime_dir.join(name)).unwrap_or_else(|e| {
+      panic!(
+        "couldn't copy the web runtime's compiler build ({}): {e}",
+        dist.join(name).display()
+      )
+    });
   }
   let version = build_version(&dir.join("analysis"), &runtime_dir);
   for (name, contents) in ASSETS {
@@ -347,7 +345,6 @@ pub fn generate(site_dir: &Path, examples: Vec<Example>) {
     dir.join("runner.html"),
     include_str!("../assets/editor/runner.html")
       .replace("__RUNTIME__", &format!("../{RUNTIME_DIR}"))
-      .replace("__HAS_COMPILER_BUILD__", &has_compiler_build.to_string())
       .replace("__VERSION__", &version),
   )
   .unwrap();

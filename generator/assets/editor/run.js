@@ -1,11 +1,35 @@
 // Running programs: each run gets a fresh iframe (runner.html), so stopping
-// or rerunning a program frees everything it held. Also the console under
+// or rerunning a program frees everything it held. A program is compiled
+// once for each version of its files (with every one of its `@cpu` entry
+// points), and later runs of that version, at any of its entry points,
+// start from the compiled program without compiling it again. Also the console under
 // the canvas, the bar above it listing the document's `@cpu` entry points,
 // and taking a picture of the canvas (a sketch's thumbnail).
 
 import { $, el } from "./util.js?v=__VERSION__";
 
 const MAX_CONSOLE_LINES = 1000;
+
+// How many compiled programs are kept, most recently used first.
+const MAX_COMPILED_PROGRAMS = 8;
+
+/** A key naming a version of a program: its main file and the text of
+ * every file (two 32-bit FNV-1a hashes, with the length). */
+function programKey(files, mainPath) {
+  let a = 0x811c9dc5;
+  let b = 0x01000193;
+  let length = 0;
+  for (const text of [mainPath, ...files.flatMap(({ path, text }) => [path, text])]) {
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      a = Math.imul(a ^ c, 0x01000193);
+      b = Math.imul(b ^ c, 0x5bd1e995);
+    }
+    a = Math.imul(a ^ 0xff, 0x01000193);
+    length += text.length + 1;
+  }
+  return `${(a >>> 0).toString(16)}${(b >>> 0).toString(16)}-${length}`;
+}
 
 export const supportsWebGPU = Boolean(navigator.gpu);
 
@@ -21,6 +45,26 @@ export class Runner {
     this.current = null;
     this.token = 0;
     this.state = "stopped";
+    // Compiled programs (`{bytes, entryPoints}`) by `programKey`.
+    this.compiled = new Map();
+  }
+
+  /** The compiled program for `key`, if there is one (marking it the most
+   * recently used). */
+  compiledProgram(key) {
+    const compiled = this.compiled.get(key);
+    if (compiled) {
+      this.compiled.delete(key);
+      this.compiled.set(key, compiled);
+    }
+    return compiled ?? null;
+  }
+
+  keepCompiled(key, compiled) {
+    this.compiled.set(key, compiled);
+    while (this.compiled.size > MAX_COMPILED_PROGRAMS) {
+      this.compiled.delete(this.compiled.keys().next().value);
+    }
   }
 
   setState(state) {
@@ -88,7 +132,9 @@ export class Runner {
    * main file (`{diagnostics, failure}`), and the program runs only when
    * that's clean (the compiler, which runs on the page's thread, can hang
    * or crash on programs the check rejects). `files` are the document's
-   * files, `entry` the `@cpu` entry point to run as `{file, name}`.
+   * files, `entry` the `@cpu` entry point to run as `{file, name}`; the
+   * program is compiled with the entry's file as its main file, unless
+   * that version of it has been compiled already.
    */
   async run({ files, entry, check }) {
     if (!supportsWebGPU) return;
@@ -125,13 +171,33 @@ export class Runner {
       src: new URL("runner.html?v=__VERSION__", import.meta.url).href,
     });
     $("stage").append(iframe);
+    // A run another one replaced while it started takes its iframe with it.
+    const abandoned = () => {
+      if (token === this.token) return false;
+      iframe.remove();
+      return true;
+    };
     await new Promise((resolve) => iframe.addEventListener("load", resolve, { once: true }));
-    if (token !== this.token) return;
+    if (abandoned()) return;
     let program;
     try {
+      const key = programKey(files, entry.file);
+      let compiled = this.compiledProgram(key);
+      if (!compiled) {
+        const result = await iframe.contentWindow.compileEasl({
+          files: files.map(({ path, text }) => ({ path, source: text })),
+          mainPath: entry.file,
+        });
+        // Copied out of the iframe, which goes away with its run.
+        compiled = {
+          bytes: new Uint8Array(result.bytes),
+          entryPoints: Array.from(result.entryPoints),
+        };
+        this.keepCompiled(key, compiled);
+      }
+      if (abandoned()) return;
       program = await iframe.contentWindow.runEasl({
-        files: files.map(({ path, text }) => ({ path, source: text })),
-        mainPath: entry.file,
+        bytes: compiled.bytes,
         entry: entry.name,
         onPrint: (line) => {
           if (token === this.token) this.log("print", line);
@@ -141,12 +207,12 @@ export class Runner {
         },
       });
     } catch (error) {
-      if (token !== this.token) return;
-      this.log("error", String(error?.message ?? error));
+      if (abandoned()) return;
+      this.log("error", String(error?.message ?? error).replace(/^easl: /, ""));
       this.setState("stopped");
       return;
     }
-    if (token !== this.token) return;
+    if (abandoned()) return;
     this.current = { iframe, program };
     this.setState("running");
     program.finished.then(
