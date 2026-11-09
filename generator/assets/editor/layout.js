@@ -1,6 +1,6 @@
-// The page's layout: the draggable splitters between the editor and the
-// output, and between the canvas and the panels under it, and the
-// keyboard-shortcut help.
+// The page's layout: the draggable splitters between the file explorer and
+// the editor, between the editor and the output, and between the canvas
+// and the panels under it, and the keyboard-shortcut help.
 
 import { $, IS_MAC, el, storage } from "./util.js?v=__VERSION__";
 
@@ -46,7 +46,31 @@ function fraction(element, variable, key, min, max) {
   };
 }
 
+// The narrowest the file explorer can be dragged, and the least room it
+// leaves the editor, in pixels.
+const MIN_EXPLORER_WIDTH = 120;
+const MIN_EDITOR_WIDTH = 200;
+
 export function setUpSplitters() {
+  // Between the file explorer and the editor: the explorer's width, in
+  // pixels.
+  const editorPane = document.querySelector(".editor-pane");
+  const setExplorerWidth = (width) => {
+    const box = editorPane.getBoundingClientRect();
+    const max = Math.max(MIN_EXPLORER_WIDTH, box.width - MIN_EDITOR_WIDTH);
+    const clamped = Math.round(Math.min(max, Math.max(MIN_EXPLORER_WIDTH, width)));
+    editorPane.style.setProperty("--explorer-width", `${clamped}px`);
+    return clamped;
+  };
+  const savedWidth = Number(storage.get("explorer-width"));
+  if (savedWidth >= MIN_EXPLORER_WIDTH) {
+    editorPane.style.setProperty("--explorer-width", `${savedWidth}px`);
+  }
+  draggable($("explorer-splitter"), (event) => {
+    const box = editorPane.getBoundingClientRect();
+    storage.set("explorer-width", setExplorerWidth(event.clientX - box.left));
+  });
+
   // Between the editor and the output: beside each other, or stacked on
   // small screens.
   const panes = $("panes");
