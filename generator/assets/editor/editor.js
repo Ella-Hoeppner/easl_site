@@ -331,6 +331,16 @@ const editor = monaco.editor.create($("editor"), {
   autoSurround: "languageDefined",
   wordBasedSuggestions: "off",
   "semanticHighlighting.enabled": true,
+  // Expanding the selection goes from a whole name (`cell-count`) to the
+  // forms around it, never through the parts of a name between `-`s.
+  smartSelect: { selectSubwords: false },
+});
+
+editor.onDidChangeCursorSelection(() => {
+  if (!changingSelection) selectionTrail = [];
+});
+editor.onDidChangeModel(() => {
+  selectionTrail = [];
 });
 
 editor.onMouseDown((event) => {
@@ -389,6 +399,40 @@ const fromSelection = (selection) => [
   selection.endColumn - 1,
 ];
 
+// Expanding the selection is easl_lsp's structural expansion alone (a whole
+// name, then each enclosing form), not Monaco's, which mixes in ranges of
+// its own (parts of names, the rest of a line, the whole file). Shrinking
+// retraces the expansions, until the selection changes some other way.
+let selectionTrail = [];
+let changingSelection = false;
+
+function setSelectionQuietly(selection) {
+  changingSelection = true;
+  editor.setSelection(selection);
+  editor.revealRange(selection);
+  changingSelection = false;
+}
+
+async function expandSelection() {
+  const model = editor.getModel();
+  if (!model) return;
+  const selection = editor.getSelection();
+  const version = model.getVersionId();
+  const expanded = await quietly(
+    analysis.request("structural", ["expandSelection", model.getValue(), ...fromSelection(selection)]),
+  );
+  if (!expanded || model.getVersionId() !== version) return;
+  const range = toRange(expanded);
+  if (range.equalsRange(selection)) return;
+  selectionTrail.push(selection);
+  setSelectionQuietly(new monaco.Selection(range.startLineNumber, range.startColumn, range.endLineNumber, range.endColumn));
+}
+
+function shrinkSelection() {
+  const previous = selectionTrail.pop();
+  if (previous) setSelectionQuietly(previous);
+}
+
 /** Runs one of easl_lsp's structural commands on the selection. */
 async function structural(command) {
   const model = editor.getModel();
@@ -423,8 +467,20 @@ for (const action of [
   {
     id: "easl.expandSelection",
     label: "Easl: Expand Selection to Enclosing Form",
-    keybindings: macOnly(KeyMod.WinCtrl | KeyCode.KeyW),
-    run: () => editor.trigger("easl", "editor.action.smartSelect.expand", null),
+    keybindings: [
+      KeyMod.Shift | KeyMod.Alt | KeyCode.RightArrow,
+      ...macOnly(KeyMod.WinCtrl | KeyCode.KeyW, KeyMod.WinCtrl | KeyMod.Shift | KeyMod.CtrlCmd | KeyCode.RightArrow),
+    ],
+    run: () => expandSelection(),
+  },
+  {
+    id: "easl.shrinkSelection",
+    label: "Easl: Shrink Selection",
+    keybindings: [
+      KeyMod.Shift | KeyMod.Alt | KeyCode.LeftArrow,
+      ...macOnly(KeyMod.WinCtrl | KeyMod.Shift | KeyMod.CtrlCmd | KeyCode.LeftArrow),
+    ],
+    run: () => shrinkSelection(),
   },
   {
     id: "easl.run",
