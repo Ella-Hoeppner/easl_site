@@ -264,6 +264,8 @@ pub async fn verify(
         publish sketches and playlists, comment, and report.",
       link => "/",
       link_text => "Back to easl",
+      // The page's visitor was read before the link verified them.
+      hide_verify_banner => true,
     },
   )
 }
