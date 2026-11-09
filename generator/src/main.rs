@@ -569,7 +569,7 @@ fn wrap_in_template(
   let editor = editor::editor_origin();
   nav.push_str(&format!(
     "<h2 class=\"nav-section\">Editor</h2>\n<ul>\n\
-     <li><a href=\"{editor}/new\">New sketch</a></li>\n\
+     <li><a href=\"{editor}/new\">Blank sketch</a></li>\n\
      <li><a href=\"{editor}/\">Explore sketches</a></li>\n</ul>\n"
   ));
 
