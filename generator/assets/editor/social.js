@@ -68,7 +68,7 @@ export class Social {
     title.textContent = doc.title;
     title.disabled = !this.canRename();
     title.title = this.canRename() ? "Rename this sketch" : doc.title;
-    $("byline").replaceChildren(...(sketch ? byline(sketch) : []));
+    $("byline").replaceChildren(...(sketch ? this.byline(sketch) : []));
     $("like").hidden = !sketch;
     $("playlist-button").hidden = !sketch;
     $("playlist-popover").hidden = true;
@@ -226,24 +226,73 @@ export class Social {
           name: "visibility",
           value,
           checked: sketch.visibility === value,
-          onchange: async () => {
-            const previous = sketch.visibility;
-            try {
-              const updated = await api.updateSketch(sketch.id, { visibility: value });
-              Object.assign(sketch, { visibility: updated.visibility, published_at: updated.published_at });
-              this.show(this.doc);
-              toast(value === "public" ? "Published: it's on Explore now" : `It's ${value} now`);
-            } catch (error) {
-              sketch.visibility = previous;
-              this.renderAbout();
-              toast(error.message, "error");
-            }
-          },
+          onchange: () => this.setVisibility(sketch, value),
         }),
         el("span", { className: "visibility-name" }, label),
         el("span", { className: "visibility-help" }, help)));
     return el("fieldset", { className: "visibility" },
       el("legend", { className: "field-label" }, "Visibility"), ...options, status);
+  }
+
+  /** Makes the visitor's own `sketch` private, unlisted, or public. */
+  async setVisibility(sketch, value) {
+    if (value === sketch.visibility) return;
+    try {
+      const updated = await api.updateSketch(sketch.id, { visibility: value });
+      Object.assign(sketch, { visibility: updated.visibility, published_at: updated.published_at });
+      toast(value === "public" ? "Published: it's on Explore now" : `It's ${value} now`);
+    } catch (error) {
+      toast(error.message, "error");
+    }
+    this.show(this.doc);
+  }
+
+  /** The bar's byline: the author, and the sketch's visibility (a button
+   * opening a menu to change it, on the visitor's own sketch; for anyone
+   * else, a badge on a sketch that isn't public). */
+  byline(sketch) {
+    const parts = [
+      el("span", { className: "byline-by" }, "by"),
+      el("a", { href: `/u/${encodeURIComponent(sketch.owner.username)}`, className: "author", title: `${sketch.owner.username}'s profile` },
+        el("img", { src: sketch.owner.avatar_url, alt: "", className: "avatar" }),
+        sketch.owner.display_name || sketch.owner.username),
+    ];
+    if (!sketch.can_edit) {
+      if (sketch.visibility !== "public") {
+        parts.push(el("span", { className: `badge ${sketch.visibility}` }, sketch.visibility));
+      }
+      return parts;
+    }
+    const menu = el("div", { className: "popover visibility-menu", role: "menu", hidden: true },
+      el("p", { className: "popover-title" }, "Who can see it"),
+      ...VISIBILITIES.map(([value, label, help]) =>
+        el("button", {
+          className: `visibility-choice${sketch.visibility === value ? " current" : ""}`,
+          role: "menuitemradio",
+          attrs: { "aria-checked": String(sketch.visibility === value) },
+          onclick: () => {
+            menu.hidden = true;
+            this.setVisibility(sketch, value);
+          },
+        },
+          el("span", { className: "visibility-name" }, label),
+          el("span", { className: "visibility-help" }, help))));
+    const button = el("button", {
+      className: `badge badge-button ${sketch.visibility}`,
+      title: "Change who can see this sketch",
+      attrs: { "aria-haspopup": "menu" },
+      onclick: () => {
+        menu.hidden = !menu.hidden;
+      },
+    }, sketch.visibility, el("span", { className: "badge-caret", attrs: { "aria-hidden": "true" } }, "▾"));
+    const anchor = el("span", { className: "popover-anchor" }, button, menu);
+    const close = (event) => {
+      if (!anchor.isConnected) document.removeEventListener("pointerdown", close);
+      else if (!anchor.contains(event.target)) menu.hidden = true;
+    };
+    document.addEventListener("pointerdown", close);
+    parts.push(anchor);
+    return parts;
   }
 
   /** Opens (or closes) the popover listing the visitor's playlists, to add
@@ -430,18 +479,6 @@ export class Social {
     sketch.comment_count = Math.max(0, sketch.comment_count + change);
     $("comments-count").textContent = sketch.comment_count ? String(sketch.comment_count) : "";
   }
-}
-
-function byline(sketch) {
-  return [
-    el("span", { className: "byline-by" }, "by"),
-    el("a", { href: `/u/${encodeURIComponent(sketch.owner.username)}`, className: "author", title: `${sketch.owner.username}'s profile` },
-      el("img", { src: sketch.owner.avatar_url, alt: "", className: "avatar" }),
-      sketch.owner.display_name || sketch.owner.username),
-    sketch.visibility === "public"
-      ? null
-      : el("span", { className: `badge ${sketch.visibility}` }, sketch.visibility),
-  ].filter(Boolean);
 }
 
 function description(text) {

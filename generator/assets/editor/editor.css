@@ -314,6 +314,62 @@ button.small {
   border-color: currentColor;
 }
 
+.badge.public {
+  color: var(--ok);
+  border-color: currentColor;
+}
+
+.badge-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: none;
+  cursor: pointer;
+}
+
+.badge-button:hover {
+  background: var(--bg-raised);
+}
+
+.badge-caret {
+  font-size: 0.65rem;
+}
+
+.visibility-menu {
+  min-width: 17rem;
+  padding: 0.45rem;
+}
+
+.visibility-menu .popover-title {
+  margin: 0.15rem 0.35rem 0.35rem;
+}
+
+.visibility-choice {
+  display: grid;
+  width: 100%;
+  gap: 0.1rem;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.visibility-choice:hover {
+  background: var(--accent-soft);
+}
+
+.visibility-choice .visibility-help {
+  grid-column: 1;
+}
+
+.visibility-choice.current .visibility-name::after {
+  content: " ✓";
+  color: var(--accent);
+}
+
 .like,
 .playlist-button {
   display: inline-flex;
@@ -488,8 +544,10 @@ button.icon {
   min-width: 0;
   min-height: 0;
   display: grid;
+  /* Until the visitor drags it, the explorer is as narrow as its names
+     allow, up to a limit. */
   grid-template-columns:
-    minmax(0, var(--explorer-width, 13rem))
+    var(--explorer-width, fit-content(13rem))
     6px
     minmax(0, 1fr);
 }
@@ -526,7 +584,8 @@ body.explorer-closed.explorer-peeking .explorer {
   bottom: 0;
   left: 0;
   z-index: 16;
-  width: var(--explorer-width, 13rem);
+  width: var(--explorer-width, max-content);
+  max-width: var(--explorer-width, 13rem);
   box-shadow: 4px 0 18px rgb(0 0 0 / 0.25);
   animation: explorer-slide 0.12s ease-out;
 }
