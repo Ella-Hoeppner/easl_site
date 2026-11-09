@@ -55,9 +55,6 @@ const PAGES: &[PageSpec] = &[
   PageSpec { source: "reference/cpu-builtins.md", nav_title: "CPU builtins", section: "Reference", preview_title: None },
 ];
 
-/// The sidebar section the editor's links close.
-const EDITOR_SECTION: &str = "Walkthroughs";
-
 /// The generated function-index page; gets a nav entry at the end of the
 /// Reference section.
 const FUNCTION_INDEX_OUTPUT: &str = "functions.html";
@@ -523,13 +520,6 @@ fn wrap_in_template(
   let mut current_section = "";
   for (spec, page) in PAGES.iter().zip(all_pages) {
     if spec.section != current_section {
-      if current_section == EDITOR_SECTION {
-        let editor = editor::editor_origin();
-        nav.push_str(&format!(
-          "<li><a href=\"{editor}/new\">Editor</a></li>\n\
-           <li><a href=\"{editor}/\">Explore sketches</a></li>\n"
-        ));
-      }
       if !current_section.is_empty() {
         nav.push_str("</ul>\n");
       }
@@ -574,6 +564,13 @@ fn wrap_in_template(
     } else {
       ""
     },
+  ));
+  // the editor's links close the sidebar, after the docs themselves
+  let editor = editor::editor_origin();
+  nav.push_str(&format!(
+    "<h2 class=\"nav-section\">Editor</h2>\n<ul>\n\
+     <li><a href=\"{editor}/new\">New sketch</a></li>\n\
+     <li><a href=\"{editor}/\">Explore sketches</a></li>\n</ul>\n"
   ));
 
   let full_title = if title.eq_ignore_ascii_case("easl") {
