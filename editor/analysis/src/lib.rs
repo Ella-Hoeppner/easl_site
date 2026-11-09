@@ -1,5 +1,5 @@
-//! The playground editor's language support, for the browser: what easl_lsp
-//! gives VS Code, for the files of one sketch. The page runs this in a worker, so a
+//! The editor's language support, for the browser: what easl_lsp gives VS
+//! Code, for the files of one sketch. The page runs this in a worker, so a
 //! slow (or stuck) compilation never freezes the editor.
 //!
 //! Most of the work is easl_lsp's own code, included unchanged from the

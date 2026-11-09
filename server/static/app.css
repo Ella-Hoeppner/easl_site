@@ -414,6 +414,12 @@ input[type="checkbox"] {
   border-radius: 10px;
 }
 
+.tab-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;

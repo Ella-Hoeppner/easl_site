@@ -1,19 +1,19 @@
-// The playground's language support, off the page's main thread: easl's
-// analysis (playground/analysis), compiled to WebAssembly. The page
+// The editor's language support, off the page's main thread: easl's
+// analysis (editor/analysis), compiled to WebAssembly. The page
 // sends `{ id, method, args }` and gets back `{ id, result }` or
 // `{ id, error, dead }`. A compiler panic ends the WebAssembly instance
 // (`dead`), and its message arrives first as `{ panic }`; the page then
 // starts a new worker.
 
-import init, * as easl from "./analysis/easl_playground_analysis.js?v=__VERSION__";
+import init, * as easl from "./analysis/easl_editor_analysis.js?v=__VERSION__";
 
 self.easlAnalysisPanic = (message) => self.postMessage({ panic: message });
 
-// The version query (see playground.rs) keeps the browser from reusing a
+// The version query (see editor.rs) keeps the browser from reusing a
 // module cached from an earlier build.
 const ready = init({
   module_or_path: new URL(
-    "analysis/easl_playground_analysis_bg.wasm?v=__VERSION__",
+    "analysis/easl_editor_analysis_bg.wasm?v=__VERSION__",
     import.meta.url,
   ),
 });

@@ -1,6 +1,6 @@
-// The social side of the editor page: the open document's byline and like
-// button in the bar, and the "About" and "Comments" tabs under the canvas
-// (title, description, visibility, playlists, forking, reporting,
+// The social side of the editor page: the open sketch's title, author,
+// like button, and playlists in the bar, and the "About" and "Comments"
+// tabs under the canvas (description, visibility, forking, reporting,
 // deleting, and the comment thread).
 
 import { $, el, fullDate, promptText, richText, timeAgo, toast } from "./util.js?v=__VERSION__";
@@ -15,9 +15,9 @@ const VISIBILITIES = [
 export class Social {
   /**
    * `user` is the signed-in visitor (or null); `actions` has the editor's
-   * document operations: `save()`, `fork()`, `saveToAccount()`,
-   * `renameDoc()`, `deleteDoc()`, `updateThumbnail()`, and `signIn()` (the
-   * sign-in page, coming back here after).
+   * document operations: `save()`, `fork()`, `renameDoc()`, `deleteDoc()`,
+   * `updateThumbnail()`, and `signIn()` (the sign-in page, coming back
+   * here after).
    */
   constructor(user, actions) {
     this.user = user;
@@ -28,6 +28,20 @@ export class Social {
       tab.addEventListener("click", () => this.selectTab(tab.dataset.panel));
     }
     $("like").addEventListener("click", () => this.toggleLike());
+    $("playlist-button").addEventListener("click", () => this.togglePlaylists());
+    $("sketch-title").addEventListener("click", () => {
+      if (this.canRename()) this.actions.renameDoc();
+    });
+    document.addEventListener("pointerdown", (event) => {
+      const popover = $("playlist-popover");
+      if (!popover.hidden && !popover.contains(event.target) && !$("playlist-button").contains(event.target)) {
+        popover.hidden = true;
+      }
+    });
+  }
+
+  canRename() {
+    return this.doc?.canSave || this.doc?.kind === "new";
   }
 
   selectTab(name) {
@@ -45,13 +59,19 @@ export class Social {
     if (name === "comments") this.loadComments();
   }
 
-  /** Shows `doc`'s byline, likes, details, and comments. */
+  /** Shows `doc`'s title, author, likes, details, and comments. */
   show(doc) {
     const changed = this.doc?.key !== doc.key;
     this.doc = doc;
     const sketch = doc.kind === "sketch" ? doc.sketch : null;
+    const title = $("sketch-title");
+    title.textContent = doc.title;
+    title.disabled = !this.canRename();
+    title.title = this.canRename() ? "Rename this sketch" : doc.title;
     $("byline").replaceChildren(...(sketch ? byline(sketch) : []));
     $("like").hidden = !sketch;
+    $("playlist-button").hidden = !sketch;
+    $("playlist-popover").hidden = true;
     $("comments-tab").hidden = !sketch;
     if (sketch) this.renderLike();
     this.renderAbout();
@@ -72,7 +92,8 @@ export class Social {
     const button = $("like");
     button.classList.toggle("liked", liked);
     button.setAttribute("aria-pressed", String(liked));
-    button.title = liked ? "Unlike" : "Like";
+    button.title = liked ? "Unlike this sketch" : "Like this sketch";
+    $("like-label").textContent = liked ? "Liked" : "Like";
     $("like-count").textContent = String(like_count);
   }
 
@@ -102,43 +123,18 @@ export class Social {
       case "sketch":
         panel.replaceChildren(...this.aboutSketch(doc.sketch));
         break;
-      case "example":
-        panel.replaceChildren(
-          el("h2", { className: "about-title" }, doc.title),
-          el("p", { className: "about-note" },
-            "An example from the docs. Your edits are kept in this browser until you reset it."),
-          this.saveCopyButtons("Save a copy"),
-        );
-        break;
-      case "local":
-        panel.replaceChildren(
-          el("h2", { className: "about-title" }, doc.title),
-          el("p", { className: "about-note" },
-            "This sketch is kept only in this browser. Save it to an account to publish it, share it, or open it elsewhere."),
-          el("div", { className: "about-actions" },
-            this.user
-              ? el("button", { className: "primary", onclick: () => this.actions.saveToAccount() }, "Save to your account")
-              : el("button", { className: "primary", onclick: () => this.actions.signIn() }, "Sign in to save it"),
-            el("button", { onclick: () => this.actions.renameDoc() }, "Rename"),
-            el("button", { className: "danger", onclick: () => this.actions.deleteDoc() }, "Delete"),
-          ),
-        );
-        break;
       default:
         panel.replaceChildren(
-          el("h2", { className: "about-title" }, "New sketch"),
+          el("h2", { className: "about-title" }, doc.title),
           el("p", { className: "about-note" },
-            "Not saved yet: your edits are kept in this browser until you save the sketch."),
+            this.user
+              ? "Not saved yet: your edits are kept in this browser until you save the sketch to your account."
+              : "Not saved yet: your edits are kept in this browser. Sign in to save the sketch, publish it, and share it."),
           el("div", { className: "about-actions" },
-            el("button", { className: "primary", onclick: () => this.actions.save() }, "Save"),
+            el("button", { className: "primary", onclick: () => this.actions.save() }, this.user ? "Save" : "Sign in to save"),
           ),
         );
     }
-  }
-
-  saveCopyButtons(label) {
-    return el("div", { className: "about-actions" },
-      el("button", { className: "primary", onclick: () => this.actions.fork() }, label));
   }
 
   aboutSketch(sketch) {
@@ -173,9 +169,6 @@ export class Social {
       parts.push(el("p", { className: "about-note" }, `This sketch is ${sketch.visibility}.`));
     }
     const actions = el("div", { className: "about-actions" });
-    if (this.user) {
-      actions.append(el("button", { onclick: () => this.togglePlaylists(sketch) }, "Add to playlist…"));
-    }
     actions.append(el("button", { onclick: () => this.actions.fork() }, owner ? "Duplicate" : "Fork"));
     if (this.user && !owner) {
       actions.append(el("button", { className: "quiet", onclick: () => this.report("sketch", sketch.id) }, "Report"));
@@ -189,7 +182,7 @@ export class Social {
         el("button", { className: "danger", onclick: () => this.actions.deleteDoc() }, "Delete"),
       );
     }
-    parts.push(actions, el("div", { id: "playlist-picker", className: "playlist-picker", hidden: true }));
+    parts.push(actions);
     return parts;
   }
 
@@ -253,10 +246,18 @@ export class Social {
       el("legend", { className: "field-label" }, "Visibility"), ...options, status);
   }
 
-  async togglePlaylists(sketch) {
-    const picker = $("playlist-picker");
+  /** Opens (or closes) the popover listing the visitor's playlists, to add
+   * the sketch to or take it out of, or to make a new one with it. */
+  async togglePlaylists() {
+    const sketch = this.doc?.sketch;
+    const picker = $("playlist-popover");
+    if (!sketch) return;
     if (!picker.hidden) {
       picker.hidden = true;
+      return;
+    }
+    if (!this.user) {
+      this.actions.signIn();
       return;
     }
     picker.hidden = false;
@@ -294,7 +295,7 @@ export class Social {
           try {
             await api.createPlaylist({ title, sketch_id: sketch.id });
             picker.hidden = true;
-            this.togglePlaylists(sketch);
+            this.togglePlaylists();
             toast(`Added to “${title}”`);
           } catch (error) {
             toast(error.message, "error");
@@ -302,6 +303,7 @@ export class Social {
         },
       }, "New playlist…");
       picker.replaceChildren(
+        el("p", { className: "popover-title" }, "Add to playlist"),
         ...(rows.length ? rows : [el("p", { className: "about-note" }, "You don't have any playlists yet.")]),
         create);
     } catch (error) {
@@ -433,7 +435,7 @@ export class Social {
 function byline(sketch) {
   return [
     el("span", { className: "byline-by" }, "by"),
-    el("a", { href: `/u/${encodeURIComponent(sketch.owner.username)}`, className: "author" },
+    el("a", { href: `/u/${encodeURIComponent(sketch.owner.username)}`, className: "author", title: `${sketch.owner.username}'s profile` },
       el("img", { src: sketch.owner.avatar_url, alt: "", className: "avatar" }),
       sketch.owner.display_name || sketch.owner.username),
     sketch.visibility === "public"

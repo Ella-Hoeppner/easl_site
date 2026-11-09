@@ -1,6 +1,8 @@
 # easl site server
 
-The dynamic half of easl-lang.org: accounts, sketches (multi-file easl programs people save and share), likes, comments, playlists, and moderation, as server-rendered pages and a JSON API. It also serves the generated static docs site (`../site`, built by `../generator`), so in production it's the only thing behind Caddy.
+The dynamic half of easl: the editor, accounts, sketches (multi-file easl programs people save and share), likes, comments, playlists, and moderation, as server-rendered pages and a JSON API, at `editor.easl-lang.org`. The docs stay at `easl-lang.org`, a static site (`../site`, built by `../generator`) that Caddy serves straight from disk in production.
+
+The server routes each request by its `Host`: the editor origin's hostname (`--editor-origin`, compared case-insensitively, port ignored) gets the app; any other host gets the docs, which the server also serves so development needs one process. On the docs host, the old playground and the app's paths redirect to the editor host.
 
 One Rust binary (axum + SQLite via sqlx + minijinja templates), built for a small VM (1 vCPU, 1 GB RAM).
 
@@ -9,13 +11,15 @@ One Rust binary (axum + SQLite via sqlx + minijinja templates), built for a smal
 ```sh
 cd ../generator && cargo run        # build the static site into ../site
 cd ../server
-cargo run -- seed                   # demo users alice/bob/carol (password: password123), sketches, a playlist
-cargo run -- serve --dev            # http://127.0.0.1:8000
+cargo run -- seed                   # users ella (admin), alice, bob, carol (password: password123), the examples, more
+cargo run -- serve --dev            # docs at http://localhost:8000, the app at http://editor.localhost:8000
 ```
+
+Browsers resolve `*.localhost` to the loopback address, so `http://editor.localhost:8000` needs no setup. For curl, pass the host: `curl -H 'Host: editor.localhost:8000' http://127.0.0.1:8000/` (or `curl http://editor.localhost:8000/` where curl resolves it too). With `--bind 127.0.0.1:8150`, the defaults follow the port (`http://editor.localhost:8150`, `http://localhost:8150`).
 
 `--dev`:
 
-- accepts `http://localhost:<port>` and `http://127.0.0.1:<port>` as request origins (besides `--origin`),
+- accepts `http://localhost:<port>`, `http://127.0.0.1:<port>`, and `http://editor.localhost:<port>` as request origins (besides `--editor-origin`),
 - sets cookies without `Secure`, so sign-in works over plain http,
 - reloads templates (`templates/`) and app assets (`static/`) from disk on every request, so design changes show on refresh,
 - logs emails instead of sending them (unless SMTP is configured) and shows verification and reset links on the page in a "Dev mode" box.
@@ -27,26 +31,35 @@ Tests: `cargo test` (integration tests in `tests/` run the real router against a
 ## Commands and configuration
 
 ```
-easl-site-server serve [--bind 127.0.0.1:8000] [--site-dir ../site] [--db ./data/easl-site.db]
-                       [--origin http://<bind>] [--dev] [--trust-proxy]
-easl-site-server seed  [--db …] [--site-dir …]
+easl-site-server serve         [--bind 127.0.0.1:8000] [--site-dir ../site] [--db ./data/easl-site.db]
+                               [--editor-origin http://editor.localhost:<port>] [--docs-origin http://localhost:<port>]
+                               [--sync-examples-owner <username>] [--dev] [--trust-proxy]
+easl-site-server sync-examples [--owner ella] [--db …] [--site-dir …]
+easl-site-server seed          [--db …] [--site-dir …]
 easl-site-server admin grant|revoke <username> [--db …]
 ```
 
-- `--origin` is the public origin (`https://easl-lang.org`). It's used for absolute links (emails, link previews) and the CSRF check, so it must match what browsers see. It defaults to `http://<bind>`.
+- `--editor-origin` is the app's public origin (`https://editor.easl-lang.org`). Its hostname decides which requests get the app, and it's used for absolute links (emails, link previews, redirects from the docs) and the CSRF check, so it must match what browsers see. It defaults to `http://editor.localhost:<bind port>`.
+- `--docs-origin` is the docs' public origin (`https://easl-lang.org`), for the app pages' links to the docs. It defaults to `http://localhost:<bind port>`.
+- `--sync-examples-owner ella` runs the examples sync (below) at startup when that user exists, logging and carrying on otherwise (no such user, no `editor/examples.json`, a conflict), so each deploy of a rebuilt site keeps the examples current.
 - `--trust-proxy` takes the client address (for rate limiting) from the last hop of `X-Forwarded-For`, which Caddy appends. Only set it behind a proxy, or clients can pick their own address.
 - `SMTP_URL` (e.g. `smtps://user:pass@smtp.example.com:465`) and `MAIL_FROM` (e.g. `easl <noreply@easl-lang.org>`) enable email. Without them, emails are logged, with a warning at startup outside dev.
 - `RUST_LOG` sets log levels (default `info,tower_http=info,sqlx=warn`).
 - The database is created and migrated (`migrations/`) on startup. Expired sessions and email tokens are deleted hourly.
 
-The editor pages read the playground build's versions from `<site-dir>/playground/manifest.json` (`{"version", "monaco_version"}`), re-reading it when the file changes, so a site rebuild needs no restart. Templates and app assets are compiled into the binary in release builds, so deploying the server means deploying one file.
+The editor pages read the editor build's versions from `<site-dir>/editor/manifest.json` (`{"version", "monaco_version"}`), and the docs' playground redirects read `<site-dir>/editor/examples.json`; both are re-read when the file changes, so a site rebuild needs no restart. Templates and app assets are compiled into the binary in release builds, so deploying the server means deploying one file.
+
+### The examples
+
+The docs' example programs are ordinary public sketches owned by `ella` (Ella's account), at ids fixed in the repo so the docs can link to them. The generator lists them in `<site-dir>/editor/examples.json` (`{"examples": [{"id", "sketch_id", "title", "description", "files": [{"path", "content"}]}]}`; `id` is the old example name that `/playground?example=<id>` links use). `sync-examples` makes each one a sketch with exactly its `sketch_id`, owned by `--owner`: it creates a missing one (public, published now), and updates an existing one's title, description, and files when they differ (bumping `updated_at` only then; the entry file stays unless it's no longer one of the files). It never deletes a sketch and never touches likes, comments, thumbnails, or visibility (so a hidden or unlisted example stays that way). Everything is checked before anything is written: it fails when the owner doesn't exist, when an example is invalid or two share a sketch id, or when a sketch id belongs to someone else's sketch. Without `editor/examples.json` it says so and does nothing. Running it again changes nothing.
 
 ## How it's organized
 
 | | |
 |---|---|
 | `src/main.rs` | the CLI |
-| `src/app.rs` | the router and the layers every request passes through |
+| `src/app.rs` | routing by host, the editor host's router, and the layers every request passes through |
+| `src/docs.rs` | the docs host: the static site and its redirects to the editor host |
 | `src/config.rs`, `src/state.rs` | configuration, rate limits, shared state |
 | `src/db.rs`, `migrations/` | the pool (WAL, foreign keys, 4 connections), ids, the schema |
 | `src/auth.rs` | passwords (argon2id), sessions, email tokens, the session middleware and `MaybeUser`/`ApiUser`/`PageUser` extractors |
@@ -55,10 +68,11 @@ The editor pages read the playground build's versions from `<site-dir>/playgroun
 | `src/users.rs`, `sketches.rs`, `playlists.rs`, `comments.rs`, `reports.rs` | the data layer and the API's JSON shapes |
 | `src/visibility.rs` | who can see what (one rule, used everywhere) |
 | `src/api/` | `/api/…` handlers |
-| `src/pages/` | page handlers (`editor.rs` renders `editor.html` for `/playground`, `/new`, `/s/<id>`) |
+| `src/pages/` | page handlers (`editor.rs` renders `editor.html` for `/new` and `/s/<id>`) |
 | `src/templates.rs`, `templates/` | minijinja (autoescaped); `base.html` is the layout, `macros.html` the sketch card |
 | `src/assets.rs`, `static/` | the pages' own CSS/JS at `/static/…?v=<hash>` |
-| `src/site.rs` | serving the static site |
+| `src/site.rs` | serving site files, and the editor build's manifest and example index |
+| `src/examples.rs` | `sync-examples`: the docs' examples as sketches |
 | `src/avatar.rs` | generated SVG avatars and placeholder thumbnails |
 | `src/text.rs` | plain text → HTML (escape, line breaks, links), dates |
 | `src/mail.rs` | SMTP / log / test mailers |
@@ -67,15 +81,19 @@ The editor pages read the playground build's versions from `<site-dir>/playgroun
 
 ### The editor template's context
 
-`editor.html` gets `page_json` (already safe inside `<script type="application/json">`), `asset_version`, `monaco_version`, `page_title`, `og` (`title`, `description`, `image`, `url`), plus what every template gets: `me`, `path`, `login_url`, `dev`, and the `static(path)` function. `page_json` is `{"mode": "playground" | "new" | "sketch", "user": Me | null, "sketch": Sketch | null, "example": string | null, "playlist": {id, title, index, count, prev, next} | null, "csrf_ok": true}`.
+`editor.html` gets `page_json` (already safe inside `<script type="application/json">`), `asset_version`, `monaco_version`, `page_title`, `og` (`title`, `description`, `image`, `url`; absolute URLs on the editor origin), plus what every template gets: `me`, `path`, `login_url`, `dev`, `editor_origin`, `docs_origin`, `app_base` (what the app's links start with: empty, or the editor origin on a 404 page served on the docs host), and the `static(path)` function. `page_json` is `{"mode": "new" | "sketch", "user": Me | null, "sketch": Sketch | null, "playlist": {id, title, index, count, prev, next} | null, "editor_origin", "docs_origin", "csrf_ok": true}`.
 
 ### Routes
 
-Pages: `/explore`, `/u/<username>` (`?tab=sketches|playlists|likes&page=`), `/u/<username>/avatar.svg`, `/p/<id>`, `/s/<id>` (`?playlist=`), `/s/<id>/thumb`, `/playground` (`?example=`), `/new`, `/login`, `/signup`, `POST /logout`, `/forgot`, `/reset/<token>`, `/verify/<token>`, `/settings` (forms post to `/settings/profile|email|password|verification|delete`), `/admin`. `/playground.html` redirects to `/playground`. Everything else is the static site.
+On the editor host — pages: `/` (explore: `?sort=new|popular|trending&q=&page=`; `/explore` redirects there with its query), `/u/<username>` (`?tab=sketches|playlists|likes&page=`), `/u/<username>/avatar.svg`, `/p/<id>`, `/playlists/new` (the form; it posts back to itself and goes to the new playlist), `/s/<id>` (`?playlist=`), `/s/<id>/thumb`, `/new`, `/login`, `/signup`, `POST /logout`, `/forgot`, `/reset/<token>`, `/verify/<token>`, `/settings` (forms post to `/settings/profile|email|password|verification|delete`), `/admin`. Files: `/static/…` (the app's assets), and from the site directory only `/editor/…` and `/easl-web/…` (`?v=` URLs cached for a year, others revalidated). Anything else is a 404.
+
+On the docs host: `/playground` and `/playground.html` redirect (308) to `<editor-origin>/s/<sketch id>` for a known `?example=<id>`, else to `<editor-origin>/new`; paths whose first segment is one of the app's (`explore`, `new`, `s`, `u`, `p`, `playlists`, `login`, `signup`, `logout`, `forgot`, `reset`, `verify`, `settings`, `admin`, `api`) redirect (308) to the same path and query on the editor host. Everything else is the static site.
 
 API (`/api`): `GET me`, `GET me/sketches`, `GET me/playlists`; `POST sketches`; `GET|PUT|DELETE sketches/<id>`; `POST sketches/<id>/fork`; `PUT sketches/<id>/thumbnail`; `POST|DELETE sketches/<id>/like`; `GET|POST sketches/<id>/comments`; `DELETE comments/<id>`; `POST playlists`; `GET|PUT|DELETE playlists/<id>`; `POST playlists/<id>/items`; `DELETE playlists/<id>/items/<sketch_id>`; `PUT playlists/<id>/order`; `POST reports`; `POST admin/sketches/<id>/hide|unhide`, `admin/users/<username>/ban|unban`, `admin/reports/<id>/resolve`. Errors are `{"error": "…"}` with 400/401/403/404/409/413/429.
 
 ## Production
+
+Two hostnames, one machine: Caddy serves `easl-lang.org` (the docs) from files, and reverse-proxies `editor.easl-lang.org` to this server. DNS needs a record for `editor` pointing at the same machine as the apex: an `A` (and `AAAA`, if the apex has one) record for `editor.easl-lang.org` with the same addresses, or a `CNAME` from `editor` to `easl-lang.org`. Caddy gets the new name's certificate by itself once the record resolves.
 
 Build on the server (or a matching Linux machine): `cargo build --release`, then install `target/release/easl-site-server` as `/usr/local/bin/easl-site-server`. The site goes where `deploy.sh` already puts it (`/srv/easl-site`); the database lives outside it, in `/var/lib/easl-site/` (owned by a dedicated `easl` user). Memory use is small (tens of MB, plus ~19 MB per concurrent password hash, at most two at once).
 
@@ -93,7 +111,9 @@ ExecStart=/usr/local/bin/easl-site-server serve \
   --bind 127.0.0.1:8000 \
   --site-dir /srv/easl-site \
   --db /var/lib/easl-site/easl-site.db \
-  --origin https://easl-lang.org \
+  --editor-origin https://editor.easl-lang.org \
+  --docs-origin https://easl-lang.org \
+  --sync-examples-owner ella \
   --trust-proxy
 EnvironmentFile=/etc/easl-site.env
 Restart=on-failure
@@ -110,10 +130,27 @@ WantedBy=multi-user.target
 
 `/etc/easl-site.env` (mode 600) holds `SMTP_URL=…` and `MAIL_FROM=…`. Then `systemctl enable --now easl-site`; `journalctl -u easl-site` for logs. The server shuts down cleanly on SIGTERM.
 
-Caddy (`/etc/caddy/Caddyfile`) proxies everything to it; the app sets its own cache headers (a year for `?v=` URLs, revalidation otherwise, `no-store` for pages that depend on the session), so the existing `Cache-Control` rules move out of Caddy:
+Caddy (`/etc/caddy/Caddyfile`) serves the docs itself and proxies the editor host. The app sets its own cache headers (a year for `?v=` URLs, revalidation otherwise, `no-store` for pages that depend on the session); the docs keep Caddy's rules. On the docs host, Caddy hands the old playground and the app's paths to the server, which answers them with its docs-host redirects (it maps `?example=<id>` to the example's sketch, so the mapping lives in one place):
 
 ```
 easl-lang.org {
+  encode zstd gzip
+
+  # The old playground and the app's paths: the server redirects them to
+  # the editor host.
+  @moved path /playground /playground.html /explore /explore/* /new /s/* /u/* /p/* /playlists/* /login /signup /logout /forgot /reset/* /verify/* /settings /settings/* /admin /api /api/*
+  handle @moved {
+    reverse_proxy 127.0.0.1:8000
+  }
+
+  handle {
+    root * /srv/easl-site
+    file_server
+    # (the existing Cache-Control rules for the docs stay here)
+  }
+}
+
+editor.easl-lang.org {
   encode zstd gzip
   reverse_proxy 127.0.0.1:8000
 }
@@ -123,7 +160,9 @@ www.easl-lang.org {
 }
 ```
 
-(The app also compresses with gzip/brotli; Caddy leaves already-encoded responses alone. Either can be dropped.)
+Caddy passes the original `Host` through, which is how the server tells the two hosts apart: requests proxied from the `easl-lang.org` block arrive as `Host: easl-lang.org` and get the docs host's redirects. (The app also compresses with gzip/brotli; Caddy leaves already-encoded responses alone. Either can be dropped.)
+
+The examples: deploy the site first, then the server. With `--sync-examples-owner ella`, each start syncs `editor/examples.json` into ella's sketches (and logs and carries on when ella doesn't exist yet). To sync by hand after a site deploy without restarting: `sudo -u easl easl-site-server sync-examples --db /var/lib/easl-site/easl-site.db --site-dir /srv/easl-site`. **Create the `ella` account (sign up at the editor host) before announcing the site**: whoever registers `ella` first owns the examples.
 
 ### Backups
 
@@ -150,13 +189,17 @@ from a daily cron job or systemd timer, copying the result off the machine (and 
 - **Signup says when a username or email is taken.** That reveals whether an email has an account (unavoidable without emailing a sign-up link first); sign-in and password-reset responses don't reveal it.
 - **`display_name` in the API falls back to the username** when unset, so clients never show an empty name.
 - **API responses include a few fields beyond the spec**: `hidden` on sketches (so owners can see a moderation hide), and `GET /api/playlists/<id>`.
-- **`page_json` doesn't embed the examples**; the editor fetches `/playground/examples.json` itself.
+- **`/explore` redirects to `/`** (308, query kept), so the gallery has one URL.
+- **The docs host's 404 page** is the app's error page with absolute links to the editor host.
+- **New playlists are made by a server-side form** (`/playlists/new`, linked from the profile's Playlists tab, its empty state, playlist pages, and the account menu) rather than by script calling the JSON API: it works without JavaScript and reports mistakes on the form. It uses the same data layer and rules as `POST /api/playlists`. The form defaults to public for verified users and private for others.
+- **Listings break `updated_at` ties by insertion order** (newest first), not by id, so two sketches saved in the same second list in the order they were made.
+- **Sessions are host-only** on the editor host (no `Domain`), so the docs never see the cookie.
 - **Pages other than the editor send a strict Content-Security-Policy** (same-origin scripts, styles, images; no framing by other sites). The editor loads Monaco from jsdelivr, so it gets none; worth adding one tailored to it.
 - **Thumbnails** of non-private sketches are cached publicly for a year under their `?v=` URL; private ones only by the viewer's browser. A sketch made private later can linger in a shared cache under its old URL (no CDN today, so moot for now).
 - **Rate limits are in memory**, so they reset on restart, and they assume one server process.
 - **Templates are embedded with `include_str!`** (one list in `src/templates.rs`; a template missing from it fails every test that renders it), and dev mode reads from `CARGO_MANIFEST_DIR`, so `--dev` is meant for `cargo run` in this directory.
-- **`--origin` defaults to `http://<bind>`** rather than a fixed `http://127.0.0.1:8000`, so `--bind 127.0.0.1:8100` works without also passing `--origin`.
-- **Reserved usernames** are in `src/validate.rs` (`RESERVED_USERNAMES`); worth a look before launch.
+- **The origins default from the bind port** (`http://editor.localhost:<port>`, `http://localhost:<port>`), so `--bind 127.0.0.1:8150` works without passing either.
+- **Reserved usernames** are in `src/validate.rs` (`RESERVED_USERNAMES`; `editor` and `playground` are among them); worth a look before launch. `ella` isn't reserved, since that would stop Ella signing up as `ella`; see the production note about registering it first.
 
 ## Not done
 

@@ -255,38 +255,47 @@ pub async fn create(
 ) -> Result<String, AppError> {
   for _ in 0..ID_ATTEMPTS {
     let id = new_public_id();
-    let mut tx = db.begin().await?;
-    let now = now();
-    let inserted = sqlx::query(
-      "INSERT INTO sketches (id, owner_id, title, description, visibility, \
-       entry_file, entry_name, forked_from, created_at, updated_at, \
-       published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&id)
-    .bind(owner_id)
-    .bind(&sketch.title)
-    .bind(&sketch.description)
-    .bind(sketch.visibility.as_str())
-    .bind(&sketch.entry_file)
-    .bind(&sketch.entry_name)
-    .bind(&sketch.forked_from)
-    .bind(now)
-    .bind(now)
-    .bind((sketch.visibility == Visibility::Public).then_some(now))
-    .execute(&mut *tx)
-    .await;
-    match inserted {
-      Ok(_) => {}
+    match insert(db, &id, owner_id, sketch).await {
+      Ok(()) => return Ok(id),
       Err(error) if is_unique_violation(&error) => continue,
       Err(error) => return Err(error.into()),
     }
-    write_files(&mut tx, &id, &sketch.files).await?;
-    tx.commit().await?;
-    return Ok(id);
   }
   Err(AppError::Internal(anyhow!(
     "couldn't find an unused sketch id"
   )))
+}
+
+/// Stores a new sketch with a chosen id; a unique violation when the id is
+/// taken.
+pub async fn insert(
+  db: &SqlitePool,
+  id: &str,
+  owner_id: i64,
+  sketch: &NewSketch,
+) -> sqlx::Result<()> {
+  let mut tx = db.begin().await?;
+  let now = now();
+  sqlx::query(
+    "INSERT INTO sketches (id, owner_id, title, description, visibility, \
+     entry_file, entry_name, forked_from, created_at, updated_at, \
+     published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .bind(id)
+  .bind(owner_id)
+  .bind(&sketch.title)
+  .bind(&sketch.description)
+  .bind(sketch.visibility.as_str())
+  .bind(&sketch.entry_file)
+  .bind(&sketch.entry_name)
+  .bind(&sketch.forked_from)
+  .bind(now)
+  .bind(now)
+  .bind((sketch.visibility == Visibility::Public).then_some(now))
+  .execute(&mut *tx)
+  .await?;
+  write_files(&mut tx, id, &sketch.files).await?;
+  tx.commit().await
 }
 
 async fn write_files(
@@ -587,7 +596,7 @@ pub async fn by_owner(
   };
   let rows = sqlx::query_as(&format!(
     "{SELECT} WHERE s.owner_id = ? AND {filter} \
-     ORDER BY s.updated_at DESC, s.id LIMIT ? OFFSET ?"
+     ORDER BY s.updated_at DESC, s.rowid DESC LIMIT ? OFFSET ?"
   ))
   .bind(viewer.id)
   .bind(owner_id)
@@ -637,7 +646,7 @@ pub async fn recent_by_owner(
   limit: i64,
 ) -> sqlx::Result<Vec<SketchRow>> {
   sqlx::query_as(&format!(
-    "{SELECT} WHERE s.owner_id = ? ORDER BY s.updated_at DESC, s.id LIMIT ?"
+    "{SELECT} WHERE s.owner_id = ? ORDER BY s.updated_at DESC, s.rowid DESC LIMIT ?"
   ))
   .bind(viewer.id)
   .bind(owner_id)

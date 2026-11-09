@@ -5,7 +5,7 @@ mod common;
 use axum::http::{Method, StatusCode};
 use serde_json::{Value, json};
 
-use common::TestApp;
+use common::{ORIGIN, TestApp};
 
 fn id_of(sketch: &Value) -> String {
   sketch["id"].as_str().expect("id").to_string()
@@ -182,7 +182,7 @@ async fn visibility_rules() {
         .status,
       StatusCode::OK
     );
-    let explore = client.get("/explore").await.text();
+    let explore = client.get("/").await.text();
     assert!(explore.contains("Public one"));
     assert!(!explore.contains("Unlisted one"));
     assert!(!explore.contains("Private one"));
@@ -255,7 +255,7 @@ async fn hidden_sketches() {
     bob.api(Method::GET, &path, Value::Null).await.status,
     StatusCode::NOT_FOUND
   );
-  assert!(!bob.get("/explore").await.text().contains("Spam"));
+  assert!(!bob.get("/").await.text().contains("Spam"));
   let own = alice.api(Method::GET, &path, Value::Null).await.json();
   assert_eq!(own["hidden"], true);
   assert_eq!(
@@ -274,7 +274,7 @@ async fn hidden_sketches() {
     bob.api(Method::GET, &path, Value::Null).await.status,
     StatusCode::OK
   );
-  assert!(bob.get("/explore").await.text().contains("Spam"));
+  assert!(bob.get("/").await.text().contains("Spam"));
 }
 
 #[tokio::test]
@@ -621,7 +621,7 @@ async fn me_sketches_and_editor_page() {
   let text = page.text();
   assert!(text.contains("monaco-editor@0.99.0"));
   assert!(text.contains("?v=abc123"));
-  assert!(page.page().contains("http://test.local/s/"));
+  assert!(page.page().contains(&format!("{ORIGIN}/s/")));
   assert_eq!(page.header("cache-control").as_deref(), Some("no-store"));
 
   // The owner's views don't count; others' count once an hour.

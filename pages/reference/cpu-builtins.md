@@ -483,7 +483,7 @@ The available input device names, sorted.
 Loads a `.wav` file as mono samples (multi-channel files are averaged). `load-wav` gives floats in `[-1, 1]`; `load-wav-raw` gives the raw integers (16-bit range). The samples are at the file's own rate — see `get-wav-sample-rate`. A relative path is relative to the file the call is written in.
 <!-- index: load-wav-raw -->
 
-```easl no-playground
+```easl no-editor
 (var kick: [f32])
 
 @cpu

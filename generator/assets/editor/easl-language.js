@@ -1,7 +1,7 @@
 // easl for the Monaco editor: tokenizing (colors close to the docs' code
 // blocks), bracket and quote behavior, and light and dark themes. The
 // language support that needs the compiler (diagnostics, hover, and so on)
-// is in playground.js, backed by the analysis worker.
+// is in features.js, backed by the analysis worker.
 
 const KEYWORDS = [
   "defn", "def", "var", "override", "struct", "enum", "import", "mod", "use",

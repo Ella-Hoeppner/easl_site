@@ -11,30 +11,31 @@
 </head>
 <body>
 <header class="site-header">
-  <a class="wordmark" href="/">easl</a>
+  <a class="wordmark" href="{{ docs_origin }}/">easl</a>
   <nav class="site-nav" aria-label="Site">
-    <a href="/guide.html">Docs</a>
-    <a href="/explore"{% if path is startingwith("/explore") %} aria-current="page"{% endif %}>Explore</a>
-    <a href="/playground">Playground</a>
-    <a class="nav-new" href="/new">New sketch</a>
+    <a href="{{ app_base }}/"{% if not app_base and (path == "/" or path is startingwith("/?")) %} aria-current="page"{% endif %}>Explore</a>
+    <a class="nav-new" href="{{ app_base }}/new">New sketch</a>
+    <a href="{{ docs_origin }}/guide.html">Docs</a>
   </nav>
   <div class="account">
     {% if me %}
     <details class="user-menu">
       <summary aria-label="Account menu">
-        <img class="avatar" src="{{ me.avatar_url }}" alt="" width="28" height="28">
+        <img class="avatar" src="{{ app_base }}{{ me.avatar_url }}" alt="" width="28" height="28">
         <span class="user-name">{{ me.username }}</span>
       </summary>
       <div class="menu-panel">
-        <a href="/u/{{ me.username }}">Profile</a>
-        <a href="/settings">Settings</a>
-        {% if me.is_admin %}<a href="/admin">Moderation</a>{% endif %}
-        <form method="post" action="/logout"><button type="submit">Sign out</button></form>
+        <a href="{{ app_base }}/u/{{ me.username }}">Profile</a>
+        <a href="{{ app_base }}/u/{{ me.username }}?tab=playlists">Playlists</a>
+        <a href="{{ app_base }}/playlists/new">New playlist</a>
+        <a href="{{ app_base }}/settings">Settings</a>
+        {% if me.is_admin %}<a href="{{ app_base }}/admin">Moderation</a>{% endif %}
+        <form method="post" action="{{ app_base }}/logout"><button type="submit">Sign out</button></form>
       </div>
     </details>
     {% else %}
-    <a href="{{ login_url }}">Sign in</a>
-    <a class="button primary" href="/signup">Sign up</a>
+    <a href="{{ app_base }}{{ login_url }}">Sign in</a>
+    <a class="button primary" href="{{ app_base }}/signup">Sign up</a>
     {% endif %}
   </div>
 </header>
@@ -48,9 +49,10 @@
 {% block content %}{% endblock %}
 </main>
 <footer class="site-footer">
-  <a href="/guide.html">Docs</a>
-  <a href="/explore">Explore</a>
-  <a href="/playground">Playground</a>
+  <a href="{{ docs_origin }}/">easl</a>
+  <a href="{{ docs_origin }}/guide.html">Docs</a>
+  <a href="{{ app_base }}/">Explore</a>
+  <a href="{{ app_base }}/new">New sketch</a>
 </footer>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>

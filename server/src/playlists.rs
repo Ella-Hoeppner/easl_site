@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
 
-use crate::auth::Viewer;
+use crate::auth::{CurrentUser, Viewer};
 use crate::db::{ID_ATTEMPTS, is_unique_violation, new_public_id, now};
 use crate::error::AppError;
 use crate::sketches::{self, SketchSummary};
@@ -185,6 +185,18 @@ pub async fn own_with_membership(
   .bind(owner_id)
   .fetch_all(db)
   .await
+}
+
+/// Whether `user` may give a playlist `visibility`: publishing needs a
+/// verified email.
+pub fn check_visibility(
+  user: &CurrentUser,
+  visibility: Visibility,
+) -> Result<(), AppError> {
+  if visibility == Visibility::Public {
+    user.require_verified("publish playlists")?;
+  }
+  Ok(())
 }
 
 /// Creates a playlist, returning its id.

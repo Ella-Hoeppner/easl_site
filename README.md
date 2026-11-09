@@ -1,25 +1,27 @@
 # Easl documentation & site
 
-The documentation for [easl](https://github.com/Ella-Hoeppner/easl) lives as plain Markdown in [`pages/`](pages/), readable directly on GitHub or in any Markdown viewer. A static site generator in [`generator/`](generator/) turns those pages into a styled HTML site, and also builds the **landing page**, a single screen with a live, WebGPU-rendered easl program as its background, and the **playground**.
+The documentation for [easl](https://github.com/Ella-Hoeppner/easl) lives as plain Markdown in [`pages/`](pages/), readable directly on GitHub or in any Markdown viewer. A static site generator in [`generator/`](generator/) turns those pages into a styled HTML site, and also builds the **landing page**, a single screen with a live, WebGPU-rendered easl program as its background. The **editor** (at `editor.easl-lang.org`), where people write, save, and share easl sketches, is in the same repository: its page and language support in `generator/` and `editor/`, and the server behind it in `server/`.
 
 ## Sibling checkouts
 
 Building the site needs two other repositories checked out next to this one:
 
-- [`easl`](https://github.com/Ella-Hoeppner/easl) at `../easl`: the compiler (a path dependency of the generator and the playground's analysis crate) and its web runtime (`../easl/web`), which the build compiles to WebAssembly.
-- [`easl_lsp`](https://github.com/Ella-Hoeppner/easl_lsp) at `../easl_lsp`: the playground's language support compiles some of its source files directly (see "The playground").
+- [`easl`](https://github.com/Ella-Hoeppner/easl) at `../easl`: the compiler (a path dependency of the generator and the editor's analysis crate) and its web runtime (`../easl/web`), which the build compiles to WebAssembly.
+- [`easl_lsp`](https://github.com/Ella-Hoeppner/easl_lsp) at `../easl_lsp`: the editor's language support compiles some of its source files directly (see "The editor").
 
 The pages document the easl in that `../easl` checkout, and every program in them must compile with it, or the build fails.
 
 ## Running the site
 
-The site is static docs (built by `generator/` into `site/`) plus a server (`server/`, see its README) that serves them and runs everything dynamic: accounts, the editor's pages, saved sketches, the gallery, profiles, comments, and playlists. To run it all locally:
+The site has two hosts: the docs (`easl-lang.org`, static, built by `generator/` into `site/`) and the editor (`editor.easl-lang.org`), served by `server/` (see its README): accounts, the editor's pages, saved sketches, explore, profiles, comments, and playlists. To run it all locally:
 
 ```
 ./dev.sh            # or PORT=8100 ./dev.sh
 ```
 
-That builds the site, seeds a demo database the first time (`server/data/easl-site.db`; sign in as `alice`, `bob`, or `carol` with the password `password123`), and starts the server in development mode at http://127.0.0.1:8000. Development mode shows email links (verification, password reset) on the page instead of sending them. Delete `server/data/` to start over.
+That builds the site, seeds a demo database the first time (`server/data/easl-site.db`; sign in as `ella`, `alice`, `bob`, or `carol` with the password `password123`), and starts the server in development mode, with the docs at http://localhost:8000 and the editor at http://editor.localhost:8000 (Chrome and Firefox send every `*.localhost` name to this machine; for Safari, add `127.0.0.1 editor.localhost` to `/etc/hosts`). Development mode shows email links (verification, password reset) on the page instead of sending them. Delete `server/data/` to start over.
+
+The docs link to the editor at `https://editor.easl-lang.org` unless `EASL_EDITOR_ORIGIN` names another (`dev.sh` sets it to the local one). Pages can write links to the editor with its production address (`https://editor.easl-lang.org/s/<id>`), which works on GitHub too; the generator rewrites them for the editor it's building for.
 
 The build also builds the easl web runtime (`../easl/web/build.sh`), so it needs the `wasm32-unknown-unknown` target and `wasm-bindgen-cli` at the version pinned in easl's `web/Cargo.toml` (see `web/build.sh` there).
 
@@ -27,7 +29,7 @@ To rebuild the site on every change to the pages or the editor while the server 
 
 ```
 cd generator
-cargo watch -w ../pages -w assets -w src -x run
+EASL_EDITOR_ORIGIN=http://editor.localhost:8000 cargo watch -w ../pages -w assets -w src -x run
 ```
 
 The server reloads its own templates (`server/templates/`) and page assets (`server/static/`) on every request in development mode.
@@ -46,7 +48,7 @@ Host easl-site
   IdentitiesOnly yes
 ```
 
-The server (a Hetzner Cloud machine running Ubuntu) serves `/srv/easl-site` with [Caddy](https://caddyserver.com), which gets the HTTPS certificates itself (WebGPU only runs on HTTPS pages) and compresses responses. Its configuration is `/etc/caddy/Caddyfile`: `www.easl-lang.org` redirects to `easl-lang.org`, and every file is served `Cache-Control: no-cache` (browsers revalidate it on each load, so a deploy shows up at once) except the playground's, which it asks for with its build's hash (`?v=…`) and which are kept for good. Uploads go in as the `deploy` user, which owns `/srv/easl-site`; root logs in with the same key, for administering the server. The domain's DNS is at Cloudflare, with the proxy off ("DNS only"), so that Caddy can get certificates for it.
+The server (a Hetzner Cloud machine running Ubuntu) serves `/srv/easl-site` with [Caddy](https://caddyserver.com), which gets the HTTPS certificates itself (WebGPU only runs on HTTPS pages) and compresses responses. Its configuration is `/etc/caddy/Caddyfile`: `www.easl-lang.org` redirects to `easl-lang.org`, and every file is served `Cache-Control: no-cache` (browsers revalidate it on each load, so a deploy shows up at once) except the editor's, which it asks for with its build's hash (`?v=…`) and which are kept for good. Uploads go in as the `deploy` user, which owns `/srv/easl-site`; root logs in with the same key, for administering the server. The domain's DNS is at Cloudflare, with the proxy off ("DNS only"), so that Caddy can get certificates for it.
 
 ## The landing page
 
@@ -71,29 +73,28 @@ The path is relative to the page's own Markdown file, and `console` adds a box u
 
 The ray marching walkthrough's programs live in `pages/raymarch/`, each one the walkthrough's program as it stands at its preview. They're separate copies of the code shown in the page, so a change to the walkthrough's code blocks needs the matching change there.
 
-## The editor (playground and sketches)
+## The editor
 
-The editor is the page where visitors write easl and run it: the docs' examples at `/playground`, a new sketch at `/new`, and saved sketches at `/s/<id>`. The site's server (`server/`, see its README) renders the page from `server/templates/editor.html`; its scripts and styles are in `generator/assets/playground/`, which the generator copies into `site/playground/` with a content hash in their URLs (`?v=…`), and the generator writes the examples to `site/playground/examples.json` and the hash to `site/playground/manifest.json` for the server.
+The editor (`editor.easl-lang.org`) is where people write easl sketches and run them: new ones at `/new`, saved ones at `/s/<id>`. The site's server (`server/`, see its README) renders the page from `server/templates/editor.html`; its scripts and styles are in `generator/assets/editor/`, which the generator copies into `site/editor/` with a content hash in their URLs (`?v=…`), writing the hash to `site/editor/manifest.json` for the server.
 
-- **Documents** (`documents.js`): the editor opens one document at a time, of four kinds: an *example* (edits kept in this browser as a draft until reset), a *sketch* on the server (its owner's edits kept as a draft until saved; anyone else can edit it locally and fork it), a sketch kept *only in this browser* (for visitors without an account), or a *new* sketch (a draft until saved). The menu in the bar switches between them in place.
-- **Files** (`files.js`): a document has one or more files (`main.easl`, `lib/noise.easl`, …), shown as tabs above the editor; one imports another with `(import "lib/noise.easl")`, and completion offers the other files' paths inside an import.
-- **Entry points**: every `@cpu` function in any of the files is an entry point. The bar above the canvas lists them; each has a ▶ in the editor's gutter, and a "Run" link in its `@cpu` annotation's hover. Running one makes it the document's entry (saved with the sketch). The runner compiles the program with the entry's file as the main file and the entry chosen by name (easl's `startProgramFromSources` `entry` option).
-- **Examples:** the landing page's program, the `.easl` files in `pages/playground/` (listed with their titles in `EXTRA_EXAMPLES` in `playground.rs`; the build fails on an unlisted one), and every live preview's program (linked from the preview as "Open in the playground"). A page's live previews are listed in one submenu, as Part 1, Part 2, …; the submenu is named by the page's `playground_menu` in `generator/src/main.rs`, or else its sidebar title. Each must compile, or the build fails. `/playground?example=<id>` opens one; the id is the program's path under `pages/` without `.easl`, with `/` replaced by `-` (`raymarch-materials`), and the landing program's is `landing`. A new sketch starts from `generator/assets/playground/new-sketch.easl`.
-- **The editor** is [Monaco](https://microsoft.github.io/monaco-editor/), loaded from jsdelivr at a pinned version (`MONACO_VERSION` in `playground.rs`). `easl-language.js` gives it easl's colors, bracket and quote auto-closing, and the theme. Enter indents by the forms around the cursor.
-- **Language support** (`analysis.js`, `features.js`) is [easl_lsp](https://github.com/Ella-Hoeppner/easl_lsp)'s, compiled to WebAssembly by `playground/analysis/` and run in a worker (`analysis-worker.js`): diagnostics, hover (types and declarations), go-to-definition (into the other files too), completion, formatting, semantic tokens, and structural editing. The file being edited is checked as the main file of its own program, with the document's other files available to import, and errors in a file it imports appear on the import. The crate includes easl_lsp's `source.rs`, `syntax.rs`, `completion.rs`, and `structural.rs` unchanged from the sibling `../easl_lsp` checkout, so building the site needs that repository next to this one. `analysis.rs` is easl_lsp's analysis with the sketch's files in place of the filesystem; keep the two in step. The generator builds the crate on every run (it needs the wasm32 target and `wasm-bindgen`, like the web runtime).
-- **Running** (`run.js`): each run gets a fresh iframe (`runner.html`) running the program with the web runtime in `site/easl-web/`, so stopping or rerunning frees everything the program held. A program only runs once the check of its entry's file has finished without errors. The analysis worker is restarted if it takes more than 10 seconds or crashes, so a program that would hang or crash the compiler never reaches the runtime, which compiles on the page's own thread. The runner also takes the pictures that become sketches' thumbnails, at the moment the program submits a frame (a WebGPU canvas can't be read after it's presented).
-- **Social** (`social.js`): on a sketch, the bar shows its author and likes, and the tabs under the canvas hold its comments and an About panel (title, description, visibility, playlists, forking, reporting, deleting). The editor talks to the server through `api.js`.
-- **Code blocks:** an `easl` code block on a docs page that's a whole program (it has a `@cpu` entry and compiles on its own) gets an "Open in the playground" link, which carries the program in the URL (`/playground#code=…`). A block fenced as ` ```easl no-playground ` doesn't, for programs the playground can't run (file I/O) or that a live preview already links.
+- **Documents** (`documents.js`): the page edits one sketch: a saved one (its owner's edits kept in this browser as a draft until saved; anyone else can edit it here and fork it), or a new one (a draft until it's saved to the visitor's account).
+- **Files** (`files.js`): a sketch has one or more files, in folders if it likes. The file explorer beside the editor (collapsible) lists them and makes, renames, moves (by renaming), and deletes files and folders; the tabs above the editor are the files that are open. One file imports another with `(import "lib/noise.easl")`, relative to its own folder (`..` works), and completion offers the other files' paths inside an import. Folders without files are kept only in drafts.
+- **Running** (`run.js`): the bar above the canvas has the run, pause, and stop buttons, and the sketch's entry points: every `@cpu` function in any of its files (as buttons, or a dropdown when there are more than three). Each also has a ▶ in the editor's gutter and a "Run" link in its `@cpu` annotation's hover. Running one makes it the sketch's entry (saved with it). Each run gets a fresh iframe (`runner.html`) running the program with the web runtime in `site/easl-web/`, compiled with the entry's file as the main file and the entry chosen by name (easl's `startProgramFromSources` `entry` option), so stopping or rerunning frees everything the program held. A program only runs once the check of its entry's file has finished without errors; the analysis worker is restarted if it takes more than 10 seconds or crashes, so a program that would hang or crash the compiler never reaches the runtime, which compiles on the page's own thread. The runner also takes the pictures that become sketches' thumbnails, at the moment the program submits a frame (a WebGPU canvas can't be read after it's presented).
+- **The bar** shows the sketch's title (click to rename one of yours), its author (linking to their profile), Like, and ＋ Playlist (add it to one of your playlists, or start a new one), then Format, Save (or Fork, for someone else's), Revert, and Share. The tabs under the canvas hold the console, the comments, and About (description, visibility, forking, reporting, deleting). The editor talks to the server through `api.js`.
+- **The editor** is [Monaco](https://microsoft.github.io/monaco-editor/), loaded from jsdelivr at a pinned version (`MONACO_VERSION` in `editor.rs`). `easl-language.js` gives it easl's colors, bracket and quote auto-closing, and the theme. Enter indents by the forms around the cursor.
+- **Language support** (`analysis.js`, `features.js`) is [easl_lsp](https://github.com/Ella-Hoeppner/easl_lsp)'s, compiled to WebAssembly by `editor/analysis/` and run in a worker (`analysis-worker.js`): diagnostics, hover (types and declarations), go-to-definition (into the other files too), completion, formatting, semantic tokens, and structural editing. The file being edited is checked as the main file of its own program, with the sketch's other files available to import, and errors in a file it imports appear on the import. The crate includes easl_lsp's `source.rs`, `syntax.rs`, `completion.rs`, and `structural.rs` unchanged from the sibling `../easl_lsp` checkout, so building the site needs that repository next to this one. `analysis.rs` is easl_lsp's analysis with the sketch's files in place of the filesystem; keep the two in step. The generator builds the crate on every run (it needs the wasm32 target and `wasm-bindgen`, like the web runtime).
+- **The docs' examples** (the landing page's program, the `.easl` files in `pages/editor/`, listed with their titles in `EXTRA_EXAMPLES` in `editor.rs`, and every live preview's program) are ordinary sketches in the editor, owned by Ella's account (`ella`). Each has a sketch id fixed in `pages/editor/sketch-ids.json` (the generator gives a new example one and saves it), so the docs link to `/s/<id>`; the generator writes the examples to `site/editor/examples.json`, and the server's `sync-examples` (run at startup with `--sync-examples-owner ella`) keeps those sketches in step. A new sketch starts from `generator/assets/editor/new-sketch.easl`.
+- **Code blocks:** an `easl` code block on a docs page that's a whole program (it has a `@cpu` entry and compiles on its own) gets an "Open in the editor" link, which opens a new sketch with the program carried in the URL (`/new#code=…`). A block fenced as ` ```easl no-editor ` doesn't, for programs the editor can't run (file I/O) or that a live preview already links.
 
 ## Layout
 
 - `pages/guide.md`, `pages/language.md`, `pages/shaders.md`, `pages/cpu.md` — the guide pages
 - `pages/raymarch.md` — the ray marching walkthrough, and `pages/raymarch/` the programs its live previews run
 - `pages/landing/`, `pages/main_page_example.easl` — the landing page's text and program
-- `pages/playground/` — the playground's own examples; `playground/analysis/` — its language support, compiled to WebAssembly
+- `pages/editor/` — the editor's own examples and the examples' sketch ids; `editor/analysis/` — the editor's language support, compiled to WebAssembly
 - `pages/reference/*.md` — the builtin function reference, one page per category
 - `generator/` — the site generator: parses the Markdown with pulldown-cmark, applies a hand-rolled easl syntax highlighter to ```` ```easl ```` code fences, and wraps everything in a template with sidebar navigation and per-page tables of contents; `generator/src/landing.rs` builds the landing page
-- `generator/assets/` — the docs stylesheet, the landing page's template and stylesheet, and the playground's page, scripts, and styles (`assets/playground/`)
+- `generator/assets/` — the docs stylesheet, the landing page's template and stylesheet, and the editor's scripts and styles (`assets/editor/`)
 - `site/` — the generated output (disposable; regenerate any time); `site/index.html` is the landing, `site/guide.html` is the docs entry point, `site/easl-web/` the hero program and the web runtime
 
 ## Conventions the generator relies on

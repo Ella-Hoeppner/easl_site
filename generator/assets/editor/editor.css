@@ -1,4 +1,4 @@
-/* the easl playground — shares the docs site's palette tokens */
+/* the easl editor — shares the docs site's palette tokens */
 
 :root {
   --bg: #fdfcfa;
@@ -135,173 +135,136 @@ button.small {
   margin-left: -0.5rem;
 }
 
-/* ---- the document menu ---- */
+/* ---- icons: shapes masked from inline SVG, drawn in the text color ---- */
 
-.doc-picker {
-  position: relative;
+.tree-icon,
+.run-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex: none;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+.tree-icon.file, .run-icon.file {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 1.5h5l3 3V14.5H4z' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M9 1.5v3h3' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.tree-icon.folder, .run-icon.folder {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1.5 3.5h4.5l1.5 1.5h7v8.5h-13z' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.tree-icon.new-file, .run-icon.new-file {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 1.5h5l3 3V8M3 1.5V14.5h5' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M12 10v5M9.5 12.5h5' stroke='black' stroke-width='1.4'/%3E%3C/svg%3E");
+}
+
+.tree-icon.new-folder, .run-icon.new-folder {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1.5 3h4.5l1.5 1.5h7V8M1.5 3v10.5h7' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M12 9.5v5M9.5 12h5' stroke='black' stroke-width='1.4'/%3E%3C/svg%3E");
+}
+
+.tree-icon.rename, .run-icon.rename {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.5 13.5l1-3.5 7.5-7.5 2.5 2.5-7.5 7.5z' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.tree-icon.delete, .run-icon.delete {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.5 4h11M6 4V2.5h4V4M4 4l.8 10h6.4L12 4' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.tree-icon.sidebar, .run-icon.sidebar {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1.5' y='2.5' width='13' height='11' rx='1.5' fill='none' stroke='black' stroke-width='1.3'/%3E%3Cpath d='M6 2.5v11' stroke='black' stroke-width='1.3'/%3E%3C/svg%3E");
+}
+
+.tree-icon.play, .run-icon.play, #pause.resume .run-icon {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 2.5l9.5 5.5L4 13.5z' fill='black'/%3E%3C/svg%3E");
+}
+
+.tree-icon.pause, .run-icon.pause {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z' fill='black'/%3E%3C/svg%3E");
+}
+
+.tree-icon.stop, .run-icon.stop {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='3' y='3' width='10' height='10' rx='1' fill='black'/%3E%3C/svg%3E");
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  padding: 0.3rem;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  border-radius: 5px;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-raised);
+}
+
+/* ---- the sketch's title, author, likes, and playlists ---- */
+
+.sketch-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
   min-width: 0;
 }
 
-.doc-button {
-  max-width: 18rem;
+.sketch-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  padding: 0.1rem 0.35rem;
+  margin-left: -0.35rem;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text);
+  max-width: 26rem;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-weight: 600;
 }
 
-.doc-button::after {
-  content: "▾";
-  margin-left: 0.45rem;
-  color: var(--text-dim);
+.sketch-title:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
-.menu {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  left: 0;
-  z-index: 20;
-  min-width: 11rem;
-  margin: 0;
-  padding: 0.25rem;
-  list-style: none;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+.sketch-title:not(:disabled):hover {
+  border-color: var(--border);
 }
 
-.menu li {
+.social-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.popover-anchor {
   position: relative;
 }
 
-.menu [role="menuitem"] {
-  display: flex;
-  width: 100%;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  padding: 0.3rem 0.6rem;
-  text-align: left;
-  white-space: nowrap;
+.popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 30;
+  min-width: 15rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
 }
 
-.menu [role="menuitem"]:hover,
-.menu [role="menuitem"]:focus-visible,
-.has-submenu:hover > [role="menuitem"],
-.has-submenu.open > [role="menuitem"] {
-  background: var(--accent-soft);
-  outline: none;
-}
-
-.menu [role="menuitem"].current {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.menu-separator {
-  height: 1px;
-  margin: 0.25rem 0.3rem;
-  background: var(--border);
-}
-
-.menu-heading {
-  padding: 0.45rem 0.6rem 0.2rem;
-  font-size: 0.72rem;
+.popover-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-dim);
-}
-
-.menu-note {
-  padding: 0.2rem 0.6rem 0.35rem;
-  font-size: 0.85rem;
-  color: var(--text-dim);
-}
-
-.menu .menu-link {
-  display: block;
-  padding: 0.3rem 0.6rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-}
-
-.menu .menu-link:hover {
-  background: var(--accent-soft);
-  text-decoration: none;
-}
-
-.menu .new-sketch [role="menuitem"] {
-  color: var(--accent);
-}
-
-.menu-separator + .new-sketch,
-.menu li + .new-sketch {
-  margin-top: 0.15rem;
-  border-top: 1px solid var(--border);
-  padding-top: 0.2rem;
-}
-
-.has-submenu > [role="menuitem"]::after {
-  content: "›";
-  margin-left: auto;
-  padding-left: 1.2rem;
-  color: var(--text-dim);
-}
-
-/* The submenu touches its item, so the pointer can cross to it without
-   leaving the item's hover. */
-.submenu {
-  display: none;
-  top: -0.25rem;
-  left: 100%;
-  min-width: 7rem;
-}
-
-.has-submenu:hover > .submenu,
-.has-submenu.open > .submenu {
-  display: block;
-}
-
-/* On narrow screens a submenu opens below its item rather than beside it. */
-@media (max-width: 40rem) {
-  .submenu {
-    position: static;
-    padding: 0 0 0 0.9rem;
-    border: none;
-    box-shadow: none;
-  }
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-button.danger {
-  color: var(--error);
-}
-
-button.danger:hover:not(:disabled) {
-  border-color: var(--error);
-}
-
-button.quiet {
-  background: none;
-  border-color: transparent;
-  color: var(--text-dim);
-}
-
-#save:disabled {
-  opacity: 0.6;
-}
-
-body[data-dirty="true"] #save:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
 }
 
 /* ---- the byline and likes ---- */
@@ -351,13 +314,25 @@ body[data-dirty="true"] #save:not(:disabled) {
   border-color: currentColor;
 }
 
-.like {
+.like,
+.playlist-button {
   display: inline-flex;
   align-items: center;
-  gap: 0.15rem;
+  gap: 0.3rem;
   font-size: 0.85rem;
-  padding: 0.25rem 0.6rem;
+  padding: 0.25rem 0.7rem;
   border-radius: 999px;
+}
+
+.like-count {
+  color: var(--text-dim);
+  padding-left: 0.3rem;
+  border-left: 1px solid var(--border);
+}
+
+.like.liked {
+  border-color: #e2457a;
+  color: #e2457a;
 }
 
 .like .like-heart {
@@ -506,28 +481,206 @@ button.icon {
     minmax(0, 1fr);
 }
 
+/* The file explorer beside the editor (collapsible), and the editor's
+   column: the open files' tabs above the editor. */
 .editor-pane {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 13rem) minmax(0, 1fr);
+}
+
+body.explorer-closed .editor-pane {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.explorer-closed .explorer {
+  display: none;
+}
+
+.editor-column {
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.editor {
+.editor-area {
   position: relative;
   min-height: 0;
+}
+
+.editor {
+  position: absolute;
+  inset: 0;
   color: var(--text-dim);
+}
+
+.editor-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--text-dim);
+  background: var(--bg);
+}
+
+/* ---- the file explorer ---- */
+
+.explorer {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-raised);
+  font-size: 0.85rem;
+}
+
+.explorer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.3rem 0.3rem 0.3rem 0.75rem;
+  position: sticky;
+  top: 0;
+  background: var(--bg-raised);
+}
+
+.explorer-title {
+  margin-right: auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.6rem;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  padding-left: calc(0.4rem + var(--depth) * 0.9rem);
+  padding-right: 0.2rem;
+}
+
+.tree-row:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.tree-row.active {
+  background: var(--accent-soft);
+}
+
+.tree-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.2rem;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-row.active .tree-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tree-row.has-problems .tree-name::after {
+  content: "●";
+  color: var(--error);
+  font-size: 0.55rem;
+}
+
+.tree-row.folder .tree-icon.folder {
+  color: var(--accent);
+}
+
+.tree-row.file .tree-icon {
+  color: var(--text-dim);
+}
+
+.tree-chevron {
+  width: 0.7rem;
+  flex: none;
+  color: var(--text-dim);
+  font-size: 0.6rem;
+}
+
+.tree-chevron::before {
+  content: "▸";
+}
+
+.tree-chevron.open::before {
+  content: "▾";
+}
+
+.tree-chevron.none::before {
+  content: "";
+}
+
+.tree-entry {
+  color: var(--ok);
+  font-size: 0.55rem;
+}
+
+.tree-actions {
+  display: flex;
+  opacity: 0;
+}
+
+.tree-actions .icon-button {
+  padding: 0.2rem;
+  font-size: 0.8rem;
+}
+
+.tree-row:hover .tree-actions,
+.tree-actions:focus-within {
+  opacity: 1;
+}
+
+.tab-strip {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  min-height: 2rem;
+}
+
+.explorer-toggle {
+  flex: none;
+  padding: 0 0.6rem;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+}
+
+body:not(.explorer-closed) .explorer-toggle {
+  color: var(--accent);
 }
 
 /* ---- file tabs ---- */
 
 .file-tabs {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: stretch;
   overflow-x: auto;
   scrollbar-width: thin;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
 }
 
 .file-tab {
@@ -680,19 +833,67 @@ button.icon {
   overflow: auto;
 }
 
-/* ---- entry points ---- */
+/* ---- the run bar: run, pause, stop; the entry points ---- */
 
-.entries {
+.run-bar {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.3rem 0.5rem;
-  overflow-x: auto;
+  gap: 0.6rem;
+  padding: 0.25rem 0.5rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
-  font-size: 0.8rem;
-  min-height: 2.1rem;
+  min-height: 2.25rem;
   box-sizing: border-box;
+}
+
+.run-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex: none;
+}
+
+.run-controls .icon-button {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.45rem;
+}
+
+.run-button {
+  color: var(--ok) !important;
+}
+
+.run-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ok) 15%, transparent) !important;
+}
+
+.entries {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.3rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+}
+
+.entry-select-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-dim);
+}
+
+.entry-select {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.15rem 0.4rem;
+  max-width: 16rem;
 }
 
 .entry {
@@ -833,6 +1034,7 @@ body.no-webgpu .idle-message {
 }
 
 .panel-tab {
+  white-space: nowrap;
   border: none;
   border-radius: 0;
   background: none;
@@ -1001,16 +1203,8 @@ body.no-webgpu .idle-message {
   font-size: 0.8rem;
 }
 
-.playlist-picker {
-  margin-top: 0.7rem;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-raised);
-}
-
-.playlist-picker[hidden] {
-  display: none;
+.popover > button {
+  margin-top: 0.4rem;
 }
 
 .playlist-row {
@@ -1027,10 +1221,6 @@ body.no-webgpu .idle-message {
 .playlist-open {
   margin-left: auto;
   font-size: 0.8rem;
-}
-
-.playlist-picker > button {
-  margin-top: 0.4rem;
 }
 
 /* ---- comments ---- */

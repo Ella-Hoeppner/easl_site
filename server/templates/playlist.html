@@ -16,7 +16,10 @@
     </p>
     {% if playlist.description %}<p class="description">{{ playlist.description|rich }}</p>{% endif %}
   </div>
-  {% if play_url %}<a class="button primary play" href="{{ play_url }}">▶ Play</a>{% endif %}
+  <div class="row">
+    {% if play_url %}<a class="button primary play" href="{{ play_url }}">▶ Play</a>{% endif %}
+    {% if playlist.can_edit %}<a class="button" href="/playlists/new">+ New playlist</a>{% endif %}
+  </div>
 </section>
 
 {% if playlist.can_edit %}
@@ -61,6 +64,6 @@
   {% endfor %}
 </ol>
 {% else %}
-<div class="empty"><p>This playlist is empty.{% if playlist.can_edit %} Add sketches to it from a sketch’s page.{% endif %}</p></div>
+<div class="empty"><p>This playlist is empty.{% if playlist.can_edit %} Add sketches to it from a sketch’s page.{% endif %}</p>{% if playlist.can_edit %}<p><a class="button" href="/">Find sketches to add</a></p>{% endif %}</div>
 {% endif %}
 {% endblock %}

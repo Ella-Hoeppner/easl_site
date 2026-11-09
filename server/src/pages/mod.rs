@@ -1,8 +1,12 @@
 //! Server-rendered HTML pages.
 //!
-//! Every page template extends `base.html`, which gets the base context
-//! from [`render`]: `me` (the signed-in user's API shape, or none), `path`
-//! (the request's path and query, for sign-in links), and `dev`.
+//! The pages live on the editor host. Every page template extends
+//! `base.html`, which gets the base context from [`render_page`]: `me` (the
+//! signed-in user's API shape, or none), `path` (the request's path and
+//! query, for sign-in links), `login_url`, `dev`, `editor_origin` and
+//! `docs_origin` (the two public origins), and `app_base` (what the app's
+//! own links start with: empty, except on pages served on the docs host,
+//! where it's the editor origin).
 
 mod account;
 mod admin;
@@ -25,7 +29,7 @@ use minijinja::value::merge_maps;
 use minijinja::{Value, context};
 
 use crate::auth::{CurrentUser, Session};
-use crate::error::{AppError, ErrorPage, PageResult};
+use crate::error::{AppError, ErrorPage, PageError, PageResult};
 use crate::state::AppState;
 use crate::text::url_encode;
 
@@ -39,13 +43,17 @@ const PAGE_CSP: &str = "default-src 'self'; img-src 'self' data:; \
 /// The pages' routes.
 pub fn router() -> Router<AppState> {
   Router::new()
-    .route("/explore", get(explore::explore))
+    .route("/", get(explore::explore))
+    .route("/explore", get(explore::redirect_home))
     .route("/u/{username}", get(profile::profile))
     .route("/u/{username}/avatar.svg", get(images::avatar))
     .route("/s/{id}", get(editor::sketch))
     .route("/s/{id}/thumb", get(images::thumbnail))
     .route("/p/{id}", get(playlist::playlist))
-    .route("/playground", get(editor::playground))
+    .route(
+      "/playlists/new",
+      get(playlist::new_form).post(playlist::create),
+    )
     .route("/new", get(editor::new_sketch))
     .route("/login", get(account::login_form).post(account::login))
     .route("/signup", get(account::signup_form).post(account::signup))
@@ -66,6 +74,11 @@ pub fn router() -> Router<AppState> {
     )
     .route("/settings/delete", post(settings::delete_account))
     .route("/admin", get(admin::admin))
+}
+
+/// The editor host's 404 page, for paths nothing else serves.
+pub async fn not_found() -> PageError {
+  PageError::not_found()
 }
 
 /// The signed-in user and the request's path, which every page needs.
@@ -135,6 +148,9 @@ fn render_html(
     path => path,
     login_url => login_url(path),
     dev => state.config.dev,
+    editor_origin => &state.config.editor_origin,
+    docs_origin => &state.config.docs_origin,
+    app_base => "",
   };
   // Later maps win, so a page can override the base context.
   state
@@ -181,10 +197,31 @@ pub fn error_response(
   status: StatusCode,
   message: &str,
 ) -> Response {
+  error_page(state, user, status, message, context! {})
+}
+
+/// The 404 page for a missing static file. Static files are served on both
+/// hosts, so its links to the app are absolute.
+pub fn static_not_found(state: &AppState) -> Response {
+  let status = StatusCode::NOT_FOUND;
+  let message = AppError::NotFound.message();
+  let context = context! { app_base => &state.config.editor_origin };
+  error_page(state, None, status, &message, context)
+}
+
+/// The error page, with `extra` merged into its context.
+fn error_page(
+  state: &AppState,
+  user: Option<&CurrentUser>,
+  status: StatusCode,
+  message: &str,
+  extra: Value,
+) -> Response {
   let context = context! {
     status => status.as_u16(),
     title => status.canonical_reason().unwrap_or("Error"),
     message => message,
+    ..extra
   };
   match render_html(state, user, "/", "error.html", context) {
     Ok(body) => html_response(status, body, true),

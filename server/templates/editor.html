@@ -12,27 +12,28 @@
 <meta property="og:url" content="{{ og.url }}">
 {% if og.image %}<meta property="og:image" content="{{ og.image }}">
 <meta name="twitter:card" content="summary_large_image">{% endif %}
-<link rel="stylesheet" href="/playground/playground.css?v={{ asset_version }}">
+<link rel="stylesheet" href="/editor/editor.css?v={{ asset_version }}">
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@{{ monaco_version }}/min/vs/loader.js"></script>
 </head>
 <body>
 <header class="bar">
-  <a class="wordmark" href="/">easl</a>
-  <div id="doc-picker" class="doc-picker">
-    <button id="doc-button" class="doc-button" aria-haspopup="menu" aria-expanded="false"></button>
-    <ul id="doc-menu" class="menu" role="menu" aria-label="Sketches and examples" hidden></ul>
+  <a class="wordmark" href="{{ docs_origin }}/" title="easl's docs">easl</a>
+  <div class="sketch-heading">
+    <button id="sketch-title" class="sketch-title" disabled></button>
+    <div id="byline" class="byline"></div>
   </div>
-  <div id="byline" class="byline"></div>
-  <button id="like" class="like" aria-pressed="false" hidden><span class="like-heart" aria-hidden="true">♥</span> <span id="like-count">0</span></button>
+  <div class="social-actions">
+    <button id="like" class="like" aria-pressed="false" hidden><span class="like-heart" aria-hidden="true">♥</span> <span id="like-label">Like</span> <span id="like-count" class="like-count">0</span></button>
+    <div class="popover-anchor">
+      <button id="playlist-button" class="playlist-button" title="Add this sketch to one of your playlists, or make a new one" hidden><span aria-hidden="true">＋</span> Playlist</button>
+      <div id="playlist-popover" class="popover" hidden></div>
+    </div>
+  </div>
   <div class="actions">
-    <button id="rename" title="Rename this sketch" hidden>Rename</button>
-    <button id="run" class="primary" title="Run (Ctrl/⌘+Enter)">▶ Run</button>
-    <button id="pause" disabled>Pause</button>
-    <button id="stop" disabled>Stop</button>
-    <button id="format" title="Format (Shift+Alt+F)">Format</button>
+    <button id="format" title="Format the file (Shift+Alt+F)">Format</button>
     <button id="save" title="Save (Ctrl/⌘+S)" hidden>Save</button>
-    <button id="fork" title="Save a copy as a sketch of your own" hidden>Fork</button>
-    <button id="reset" hidden>Reset</button>
+    <button id="fork" class="primary" title="Save a copy of this sketch as one of yours" hidden>Fork</button>
+    <button id="reset" title="Discard the changes you haven't saved" hidden>Revert</button>
     <button id="share" title="Copy a link to this sketch" hidden>Share</button>
   </div>
   <label class="toggle" title="Format the file each time you save (Ctrl/⌘+S)">
@@ -41,8 +42,8 @@
   </label>
   <button id="status" class="status" data-kind="analyzing" title="Click to go to the next problem">Checking…</button>
   <nav class="links">
-    <a href="/explore">Explore</a>
-    <a href="/guide.html">Docs</a>
+    <a href="/">Explore</a>
+    <a href="{{ docs_origin }}/guide.html">Docs</a>
     <button id="help" class="icon" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
     <div id="account" class="account"></div>
   </nav>
@@ -52,16 +53,32 @@
 
 <main id="panes" class="panes">
   <section class="editor-pane" aria-label="Editor">
-    <div id="file-tabs" class="file-tabs" role="tablist" aria-label="Files"></div>
-    <div id="editor" class="editor"></div>
+    <aside id="explorer" class="explorer" aria-label="Files"></aside>
+    <div class="editor-column">
+      <div class="tab-strip">
+        <button id="explorer-toggle" class="explorer-toggle icon-button" aria-controls="explorer" aria-label="Files"><span class="tree-icon sidebar" aria-hidden="true"></span></button>
+        <div id="file-tabs" class="file-tabs" role="tablist" aria-label="Open files"></div>
+      </div>
+      <div class="editor-area">
+        <div id="editor" class="editor"></div>
+        <p id="editor-empty" class="editor-empty" hidden>Open a file from the list of files.</p>
+      </div>
+    </div>
   </section>
   <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
   <section class="output-pane" aria-label="Output">
     <nav id="playlist-nav" class="playlist-nav" aria-label="Playlist" hidden></nav>
-    <div id="entries" class="entries" aria-label="Entry points"></div>
+    <div class="run-bar">
+      <div class="run-controls">
+        <button id="run" class="run-button icon-button" title="Run (Ctrl/⌘+Enter)" aria-label="Run"><span class="run-icon play" aria-hidden="true"></span></button>
+        <button id="pause" class="icon-button" title="Pause" aria-label="Pause" disabled><span class="run-icon pause" aria-hidden="true"></span></button>
+        <button id="stop" class="icon-button" title="Stop" aria-label="Stop" disabled><span class="run-icon stop" aria-hidden="true"></span></button>
+      </div>
+      <div id="entries" class="entries" aria-label="Entry points"></div>
+    </div>
     <div id="stage" class="stage">
       <div class="stage-message">
-        <p class="idle-message">Press <strong>Run</strong> to start the program.</p>
+        <p class="idle-message">Press <strong>▶</strong> to start the program.</p>
         <p class="checking-message">Checking the program…</p>
         <p class="no-webgpu-message">Running programs needs a browser with WebGPU (current Chrome, Edge, or Safari). You can still edit, and the editor still checks your code.</p>
       </div>
@@ -88,7 +105,7 @@
 <dialog id="help-dialog" class="help">
   <h2>Keyboard shortcuts</h2>
   <table id="shortcuts"></table>
-  <p>Hover over a name to see its type or declaration. Every <code>@cpu</code> function is an entry point: run one with the ▶ beside it, or from the bar above the canvas. A sketch can have several files; import one from another with <code>(import "lib.easl")</code>.</p>
+  <p>Hover over a name to see its type or declaration. Every <code>@cpu</code> function is an entry point: run one with the ▶ beside it, or from the bar above the canvas. A sketch can have many files, in folders; one imports another with <code>(import "lib/noise.easl")</code>, relative to its own folder.</p>
   <form method="dialog"><button id="help-close">Close</button></form>
 </dialog>
 
@@ -105,21 +122,9 @@
   </form>
 </dialog>
 
-<dialog id="save-dialog" class="help prompt">
-  <form method="dialog">
-    <h2>Save your sketch</h2>
-    <p>Sign in to save it to your account, where you can publish it, share it, and open it anywhere. Or keep it in this browser for now.</p>
-    <div class="dialog-buttons">
-      <button value="">Cancel</button>
-      <button value="local">Keep in this browser</button>
-      <button value="sign-in" class="primary">Sign in</button>
-    </div>
-  </form>
-</dialog>
-
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script id="page-data" type="application/json">{{ page_json|safe }}</script>
-<script type="module" src="/playground/editor.js?v={{ asset_version }}"></script>
+<script type="module" src="/editor/editor.js?v={{ asset_version }}"></script>
 </body>
 </html>

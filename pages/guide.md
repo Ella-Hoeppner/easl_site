@@ -16,7 +16,7 @@ Easl can also be run on the CPU, and the CPU runtime can open windows, dispatch 
 - **[The CPU runtime](cpu.md)** demonstrates the CPU side of the language, including the process of spawning windows, dispatching shaders, responding to user input, and generating audio.
 - **[Builtin reference](reference/overview.md)** and the searchable **[function index](functions.md)** are useful for seeing all of the builtin functions available in easl.
 - **[Worked example: Raymarching](raymarch.md)** is a walkthrough that uses easl to build a raymarcher. It shows off a lot of easl's unique features and is a great way to get started with the language.
-- **[Playground](playground.html)** lets you write easl in your browser and run it live, with types on hover and errors as you type. Every example on these pages that's a whole program has a link to open it there.
+- **[The editor](https://editor.easl-lang.org/new)** lets you write easl in your browser and run it live, with types on hover and errors as you type, then save your sketches, publish them, and share them. Every example on these pages that's a whole program has a link to open it there, and [Explore](https://editor.easl-lang.org/) shows what everyone has made.
 
 ## Tooling
 

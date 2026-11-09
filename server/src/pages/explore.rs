@@ -1,6 +1,7 @@
-//! `/explore`: the public gallery.
+//! `/`: the public gallery, the editor host's home page.
 
-use axum::extract::{Query, State};
+use axum::extract::{Query, RawQuery, State};
+use axum::response::{IntoResponse, Redirect, Response};
 use minijinja::context;
 use serde::Deserialize;
 
@@ -20,7 +21,7 @@ pub struct ExploreQuery {
   page: Option<String>,
 }
 
-/// `GET /explore?sort=new|popular|trending&q=…&page=N`.
+/// `GET /?sort=new|popular|trending&q=…&page=N`.
 pub async fn explore(
   State(state): State<AppState>,
   page: PageContext,
@@ -54,13 +55,13 @@ pub async fn explore(
   .map(|(option, label)| {
     context! {
       label,
-      url => url_with("/explore", &[("sort", option.as_str()), ("q", &search)]),
+      url => url_with("/", &[("sort", option.as_str()), ("q", &search)]),
       current => *option == sort,
     }
   })
   .collect();
   let pages = page_links(
-    "/explore",
+    "/",
     &[("sort", sort.as_str()), ("q", &search)],
     number,
     results.has_more,
@@ -77,4 +78,14 @@ pub async fn explore(
       pages,
     },
   )
+}
+
+/// `GET /explore`: the gallery's old address, redirecting to `/` with the
+/// same query.
+pub async fn redirect_home(RawQuery(query): RawQuery) -> Response {
+  let location = match query {
+    Some(query) if !query.is_empty() => format!("/?{query}"),
+    _ => "/".to_string(),
+  };
+  Redirect::permanent(&location).into_response()
 }

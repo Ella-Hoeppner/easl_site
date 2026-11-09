@@ -27,6 +27,10 @@ const TEMPLATES: &[(&str, &str)] = &[
   ("explore.html", include_str!("../templates/explore.html")),
   ("profile.html", include_str!("../templates/profile.html")),
   ("playlist.html", include_str!("../templates/playlist.html")),
+  (
+    "playlist_new.html",
+    include_str!("../templates/playlist_new.html"),
+  ),
   ("login.html", include_str!("../templates/login.html")),
   ("signup.html", include_str!("../templates/signup.html")),
   (

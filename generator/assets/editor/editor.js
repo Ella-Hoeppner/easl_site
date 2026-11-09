@@ -1,40 +1,32 @@
-// The editor page (server/templates/editor.html): a Monaco editor for a
-// sketch's easl files beside a canvas running the program.
+// The editor page (server/templates/editor.html, on the editor's own host):
+// a Monaco editor for a sketch's easl files beside a canvas running the
+// program.
 //
-// - The page opens a document (see documents.js): one of the docs'
-//   examples (/playground), a new sketch (/new), or a saved sketch
-//   (/s/<id>), as the server's page data says, and can switch between
-//   documents in place from the menu in its bar.
+// - The page opens a document (see documents.js): a saved sketch
+//   (/s/<id>) or a new one (/new), as the server's page data says.
+// - A sketch's files (in folders, if it likes) are listed in the file
+//   explorer beside the editor (files.js); the tabs above the editor are
+//   the files that are open.
 // - Language support comes from the analysis worker (analysis.js,
 //   features.js), which checks the file being edited along with the other
 //   files it imports.
-// - A document can define several `@cpu` entry points, in any of its
-//   files. The bar above the canvas lists them, and each one has a ▶ in
-//   the editor's gutter (and a link in its `@cpu` annotation's hover) to
-//   run it; the document remembers the one it runs.
+// - A sketch can define several `@cpu` entry points, in any of its files.
+//   The bar above the canvas (with the run, pause, and stop buttons) lists
+//   them, and each one has a ▶ in the editor's gutter (and a link in its
+//   `@cpu` annotation's hover) to run it; the sketch remembers the one it
+//   runs.
 // - Each run happens in a fresh iframe (run.js); a program only runs once
 //   the check of the file holding its entry point is clean.
-// - Edits are kept in this browser (as drafts, or as the sketches kept
-//   only here) until they're saved to the server.
+// - Edits are kept in this browser as drafts until they're saved to the
+//   server.
 
 import { registerEasl, currentTheme, indentAfter } from "./easl-language.js?v=__VERSION__";
 import { $, IS_MAC, el, pathProblem, promptText, storage, toast } from "./util.js?v=__VERSION__";
 import { api } from "./api.js?v=__VERSION__";
 import { Analysis, quietly } from "./analysis.js?v=__VERSION__";
 import { Checker, rangeMaker, registerFeatures } from "./features.js?v=__VERSION__";
-import {
-  createLocalSketch,
-  deleteLocalSketch,
-  exampleDoc,
-  forgetNewDraft,
-  localDoc,
-  localSketches,
-  newDoc,
-  renameLocalSketch,
-  sketchDoc,
-} from "./documents.js?v=__VERSION__";
-import { FileTabs } from "./files.js?v=__VERSION__";
-import { DocMenu } from "./menu.js?v=__VERSION__";
+import { forgetDraft, newDoc, sketchDoc } from "./documents.js?v=__VERSION__";
+import { FileExplorer, FileTabs, explorerOpen } from "./files.js?v=__VERSION__";
 import { Runner, renderEntries, supportsWebGPU } from "./run.js?v=__VERSION__";
 import { Social } from "./social.js?v=__VERSION__";
 import { setUpHelp, setUpSplitters } from "./layout.js?v=__VERSION__";
@@ -43,28 +35,26 @@ const page = JSON.parse($("page-data").textContent);
 const user = page.user;
 const MONACO = document.documentElement.dataset.monaco;
 
-const catalog = await fetch(new URL("examples.json?v=__VERSION__", import.meta.url))
-  .then((response) => response.json())
-  .catch(() => ({ default: null, newSketch: "", examples: [] }));
-const examples = [...catalog.examples];
+// The program a new sketch starts with.
+const starter = await fetch(new URL("new-sketch.easl?v=__VERSION__", import.meta.url))
+  .then((response) => (response.ok ? response.text() : ""))
+  .catch(() => "");
 
-// A program linked from the docs (`#code=<base64url>`) is one more example.
-// Its id comes from its text, so reopening the same link restores its
-// edits.
-const linkedExample = (() => {
+// A program a link carries (`/new#code=<base64url>`, as the docs link to
+// their programs), as `{source, encoded, id}`. Its id comes from its text,
+// so reopening the same link restores its edits.
+const linkedCode = (() => {
   const encoded = new URLSearchParams(location.hash.slice(1)).get("code");
-  if (page.mode !== "playground" || !encoded) return null;
+  if (page.mode !== "new" || !encoded) return null;
   try {
     const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
     const source = new TextDecoder().decode(bytes);
-    return { id: `linked-${hash(source)}`, title: "The program you opened", source, menu: null, linked: encoded };
+    return { source, encoded, id: `code-${hash(source)}` };
   } catch {
     return null;
   }
 })();
-if (linkedExample) examples.unshift(linkedExample);
-const examplesById = new Map(examples.map((example) => [example.id, example]));
 
 /** A short hash of `text` (32-bit FNV-1a, in hex). */
 function hash(text) {
@@ -204,7 +194,7 @@ const checker = new Checker({
     if (result.doc !== doc) return;
     filesWithProblems.delete(result.model.path);
     if (result.failure || result.diagnostics.length > 0) filesWithProblems.add(result.model.path);
-    fileTabs.render(doc, activePath, filesWithProblems);
+    renderFiles();
     if (result.model !== activeModel()) return;
     if (result.failure) {
       setStatus("failure", "Couldn't check");
@@ -292,6 +282,7 @@ function showEntries() {
   });
   entryDecorations.collection ??= editor.createDecorationsCollection();
   entryDecorations.collection.set(decorations);
+  renderFiles();
 }
 
 /** The entry point whose `@cpu` annotation is at `position` in `model`. */
@@ -511,156 +502,251 @@ editor.addCommand(
 
 // ---- files ----
 
-const fileTabs = new FileTabs($("file-tabs"), {
-  select: (path) => showFile(path),
-  add: () => addFile(),
-  rename: (path) => renameFile(path),
-  remove: (path) => removeFile(path),
+// The files open in tabs, in order.
+let openFiles = [];
+
+const explorer = new FileExplorer($("explorer"), {
+  open: (path) => showFile(path),
+  newFile: (folder) => addFile(folder),
+  newFolder: (folder) => addFolder(folder),
+  rename: (path, isFolder) => (isFolder ? renameFolder(path) : renameFile(path)),
+  remove: (path, isFolder) => (isFolder ? removeFolder(path) : removeFile(path)),
+  refresh: () => renderFiles(),
 });
 
-/** Shows the document's file at `path` in the editor. */
+const fileTabs = new FileTabs($("file-tabs"), {
+  select: (path) => showFile(path),
+  close: (path) => closeFile(path),
+});
+
+/** Shows the explorer and the tabs as the document is now. */
+function renderFiles() {
+  if (!doc) return;
+  const withEntries = new Set(
+    doc.files.map((file) => file.path).filter((path) => (entriesByPath.get(path) ?? []).length > 0),
+  );
+  explorer.render(doc, activePath, filesWithProblems, withEntries);
+  fileTabs.render(openFiles, activePath, filesWithProblems);
+}
+
+/** Shows or hides the explorer, remembering the choice when it's the
+ * visitor's (`remember`). */
+function setExplorerOpen(open, remember = true) {
+  if (remember) explorerOpen.set(open);
+  document.body.classList.toggle("explorer-closed", !open);
+  $("explorer-toggle").setAttribute("aria-expanded", String(open));
+  $("explorer-toggle").title = open ? "Hide the files" : "Show the files";
+}
+$("explorer-toggle").addEventListener("click", () =>
+  setExplorerOpen(document.body.classList.contains("explorer-closed")),
+);
+// On a phone, the editor needs the whole width, so the explorer starts
+// closed there.
+setExplorerOpen(explorerOpen.get() && !matchMedia("(max-width: 40rem)").matches, false);
+
+/** Shows the document's file at `path` in the editor, opening its tab. */
 function showFile(path) {
   if (!doc.file(path)) return;
   activePath = path;
+  if (!openFiles.includes(path)) openFiles.push(path);
   editor.setModel(modelFor(doc, path));
-  fileTabs.render(doc, activePath, filesWithProblems);
+  editor.updateOptions({ readOnly: false });
+  $("editor-empty").hidden = true;
   showEntries();
   setStatus("analyzing", "Checking…");
   checker.schedule(activeModel(), 0);
 }
 
-const otherPathProblem = (path, except = null) =>
-  pathProblem(path) ??
-  (path !== except && doc.file(path) ? "There's already a file with that name." : null);
+/** Closes `path`'s tab (the file stays in the sketch). */
+function closeFile(path) {
+  const index = openFiles.indexOf(path);
+  if (index < 0) return;
+  openFiles.splice(index, 1);
+  if (activePath !== path) {
+    renderFiles();
+    return;
+  }
+  const next = openFiles[Math.min(index, openFiles.length - 1)];
+  if (next) {
+    showFile(next);
+  } else {
+    activePath = null;
+    editor.setModel(null);
+    $("editor-empty").hidden = false;
+    setStatus("analyzing", "");
+    showEntries();
+  }
+}
 
-async function addFile() {
+/** Every folder of the document: the empty ones it keeps, and every
+ * folder holding a file. */
+function allFolders() {
+  const folders = new Set(doc.folders);
+  for (const file of doc.files) {
+    const parts = file.path.split("/");
+    for (let i = 1; i < parts.length; i++) folders.add(parts.slice(0, i).join("/"));
+  }
+  return folders;
+}
+
+const takenProblem = (path, except = null) =>
+  path !== except && (doc.file(path) || allFolders().has(path))
+    ? "There's already a file or folder with that name."
+    : null;
+
+const filePathProblem = (path, except = null) => pathProblem(path) ?? takenProblem(path, except);
+
+function folderPathProblem(path, except = null) {
+  if (!path) return "A folder needs a name.";
+  if (!path.split("/").every((segment) => /^[A-Za-z0-9._-]+$/.test(segment) && segment !== "." && segment !== "..")) {
+    return "Use only letters, digits, and . _ - in folder names, separated by single slashes.";
+  }
+  return takenProblem(path, except);
+}
+
+/** `folder` (a folder path or "") as a prefix for paths inside it. */
+const inside = (folder) => (folder ? `${folder}/` : "");
+
+async function addFile(folder = "") {
   const path = await promptText({
     title: "New file",
-    label: "File name (it can include folders, like lib/noise.easl)",
-    value: "",
+    label: folder ? `File name, in ${folder}/` : "File name (it can include folders, like lib/noise.easl)",
+    value: inside(folder),
     confirm: "Add file",
-    validate: (path) => otherPathProblem(path),
+    validate: (path) => filePathProblem(path),
   });
   if (!path) return;
   doc.files.push({ path, text: "" });
+  doc.folders = doc.folders.filter((f) => !path.startsWith(`${f}/`));
   documentChanged([path]);
   showFile(path);
   editor.focus();
   toast(`Import it from another file with (import "${path}")`);
 }
 
+async function addFolder(parent = "") {
+  const path = await promptText({
+    title: "New folder",
+    label: parent ? `Folder name, in ${parent}/` : "Folder name",
+    value: inside(parent),
+    confirm: "Add folder",
+    validate: (path) => folderPathProblem(path.replace(/\/+$/, "")),
+  });
+  if (!path) return;
+  doc.folders.push(path.replace(/\/+$/, ""));
+  doc.persist();
+  renderFiles();
+}
+
+/** Moves the file at `from` to `to`, keeping its model's place in the
+ * tabs and the entry point that names it. */
+function moveFile(from, to) {
+  const file = doc.file(from);
+  dropModel(doc, from);
+  file.path = to;
+  if (doc.entry?.file === from) doc.entry = { ...doc.entry, file: to };
+  entriesByPath.set(to, entriesByPath.get(from) ?? []);
+  entriesByPath.delete(from);
+  filesWithProblems.delete(from);
+  openFiles = openFiles.map((path) => (path === from ? to : path));
+  if (activePath === from) activePath = to;
+}
+
 async function renameFile(path) {
   const renamed = await promptText({
     title: "Rename file",
-    label: "File name",
+    label: "File name (change its folders to move it)",
     value: path,
     confirm: "Rename",
-    validate: (name) => otherPathProblem(name, path),
+    validate: (name) => filePathProblem(name, path),
   });
   if (!renamed || renamed === path) return;
-  const file = doc.file(path);
-  dropModel(doc, path);
-  file.path = renamed;
-  if (doc.entry?.file === path) doc.entry = { ...doc.entry, file: renamed };
-  entriesByPath.set(renamed, entriesByPath.get(path) ?? []);
-  entriesByPath.delete(path);
-  filesWithProblems.delete(path);
-  if (activePath === path) activePath = renamed;
+  moveFile(path, renamed);
   documentChanged();
-  showFile(activePath);
+  if (activePath) showFile(activePath);
+}
+
+async function renameFolder(folder) {
+  const renamed = await promptText({
+    title: "Rename folder",
+    label: "Folder name (change its parent folders to move it)",
+    value: folder,
+    confirm: "Rename",
+    validate: (name) => folderPathProblem(name.replace(/\/+$/, ""), folder),
+  });
+  const target = renamed?.replace(/\/+$/, "");
+  if (!target || target === folder) return;
+  const prefix = `${folder}/`;
+  for (const file of [...doc.files]) {
+    if (file.path.startsWith(prefix)) moveFile(file.path, `${target}/${file.path.slice(prefix.length)}`);
+  }
+  doc.folders = doc.folders.map((f) =>
+    f === folder ? target : f.startsWith(prefix) ? `${target}/${f.slice(prefix.length)}` : f,
+  );
+  documentChanged();
+  if (activePath) showFile(activePath);
+  else renderFiles();
 }
 
 function removeFile(path) {
-  if (doc.files.length === 1) return;
+  if (doc.files.length === 1) {
+    toast("A sketch needs at least one file.", "error");
+    return;
+  }
   if (doc.file(path).text.trim() && !confirm(`Delete ${path}?`)) return;
   doc.files = doc.files.filter((file) => file.path !== path);
+  // Its folder stays, even if this was the last file in it.
+  const slash = path.lastIndexOf("/");
+  if (slash > 0 && !allFolders().has(path.slice(0, slash))) doc.folders.push(path.slice(0, slash));
   dropModel(doc, path);
   entriesByPath.delete(path);
   filesWithProblems.delete(path);
   if (doc.entry?.file === path) doc.entry = null;
-  if (activePath === path) activePath = doc.files[0].path;
+  closeFile(path);
   documentChanged();
-  showFile(activePath);
+}
+
+function removeFolder(folder) {
+  const prefix = `${folder}/`;
+  const inFolder = doc.files.filter((file) => file.path.startsWith(prefix));
+  if (inFolder.length === doc.files.length) {
+    toast("A sketch needs at least one file outside the folders it deletes.", "error");
+    return;
+  }
+  if (inFolder.length > 0 &&
+      !confirm(`Delete ${folder} and the ${inFolder.length} file${inFolder.length === 1 ? "" : "s"} in it?`)) {
+    return;
+  }
+  for (const file of inFolder) {
+    dropModel(doc, file.path);
+    entriesByPath.delete(file.path);
+    filesWithProblems.delete(file.path);
+    if (doc.entry?.file === file.path) doc.entry = null;
+    closeFile(file.path);
+  }
+  doc.files = doc.files.filter((file) => !file.path.startsWith(prefix));
+  doc.folders = doc.folders.filter((f) => f !== folder && !f.startsWith(prefix));
+  documentChanged();
+  renderFiles();
 }
 
 // ---- the bar ----
 
-const menu = new DocMenu(
-  { picker: $("doc-picker"), button: $("doc-button"), menu: $("doc-menu") },
-  (target) => openTarget(target),
-);
-
-let remoteSketches = null;
-
-async function fillMenu() {
-  menu.fill({
-    examples,
-    remote: user ? remoteSketches ?? [] : null,
-    local: localSketches(),
-    profileUrl: user ? `/u/${encodeURIComponent(user.username)}` : null,
-  });
-}
-
-async function refreshRemoteSketches() {
-  if (!user) return;
-  const result = await quietly(api.mySketches());
-  if (result) {
-    remoteSketches = result.sketches;
-    fillMenu();
-  }
-}
-
 /** The bar's buttons for the open document. */
 function updateBar() {
-  const kind = doc.kind;
   const owned = doc.canSave;
   const dirty = doc.isDirty();
   const save = $("save");
-  save.hidden = !(owned || kind === "new");
+  save.hidden = !(owned || doc.kind === "new");
   save.disabled = owned && !dirty;
   save.textContent = owned && !dirty ? "Saved" : "Save";
-  const fork = $("fork");
-  fork.hidden = !(kind === "example" || (kind === "sketch" && !owned));
-  fork.textContent = kind === "example" ? "Save a copy" : "Fork";
-  $("rename").hidden = !(kind === "local" || owned);
-  const reset = $("reset");
-  reset.hidden = !((kind === "example" || kind === "sketch") && dirty);
-  reset.textContent = kind === "example" ? "Reset" : "Revert";
-  reset.title =
-    kind === "example"
-      ? "Discard your changes to this example"
-      : "Discard the changes you haven't saved";
-  $("share").hidden = kind !== "sketch";
+  $("fork").hidden = !(doc.kind === "sketch" && !owned);
+  $("reset").hidden = !(doc.kind === "sketch" && dirty);
+  $("share").hidden = doc.kind !== "sketch";
   document.body.dataset.dirty = String(dirty);
 }
 
 // ---- opening documents ----
-
-/** Opens the document `{kind, id}` chosen from the menu. */
-async function openTarget({ kind, id }) {
-  flushPersist();
-  switch (kind) {
-    case "example":
-      openDoc(exampleDoc(examplesById.get(id)), { run: true });
-      break;
-    case "local":
-      openDoc(localDoc(id, catalog.newSketch), { run: true });
-      break;
-    case "new":
-      openDoc(newDoc(catalog.newSketch), { run: true });
-      break;
-    case "sketch":
-      try {
-        const sketch = await api.getSketch(id);
-        const { doc: opened, staleDraft } = sketchDoc(sketch);
-        openDoc(opened, { run: true });
-        if (staleDraft) offerStaleDraft(staleDraft);
-      } catch (error) {
-        toast(error.message, "error");
-      }
-      break;
-  }
-}
 
 function openDoc(next, { run: shouldRun = false } = {}) {
   runner.stop();
@@ -670,19 +756,18 @@ function openDoc(next, { run: shouldRun = false } = {}) {
   filesWithProblems.clear();
   hideNotice();
   activePath = doc.entry?.file && doc.file(doc.entry.file) ? doc.entry.file : doc.files[0].path;
+  openFiles = [activePath];
   // Models of this document from earlier take its files as they are now.
   for (const file of doc.files) modelFor(doc, file.path);
   editor.setModel(modelFor(doc, activePath));
-  fileTabs.render(doc, activePath, filesWithProblems);
-  menu.setCurrent(doc.title, { kind: doc.kind, id: doc.id });
+  $("editor-empty").hidden = true;
+  renderFiles();
   document.title = `${doc.title} — easl`;
-  const url = doc.kind === "example" && doc.example.linked
-    ? `/playground#code=${doc.example.linked}`
-    : doc.kind === "sketch" && page.playlist && page.sketch?.id === doc.id
+  const url =
+    doc.kind === "sketch" && page.playlist && page.sketch?.id === doc.id
       ? `${doc.url}?playlist=${encodeURIComponent(page.playlist.id)}`
       : doc.url;
   history.replaceState(null, "", url);
-  if (doc.kind === "example" || doc.kind === "local") storage.set("last", doc.kind === "example" ? doc.id : `local:${doc.id}`);
   renderPlaylistNav();
   social.show(doc);
   updateBar();
@@ -703,6 +788,7 @@ function reloadFiles() {
   for (const [path] of models.get(doc.key) ?? []) {
     if (!doc.file(path)) dropModel(doc, path);
   }
+  openFiles = openFiles.filter((path) => doc.file(path));
   if (!doc.file(activePath)) activePath = doc.files[0].path;
   documentChanged();
   showFile(activePath);
@@ -713,6 +799,7 @@ function offerStaleDraft(draft) {
     ["Restore them", () => {
       doc.files = draft.files.map((file) => ({ ...file }));
       doc.entry = draft.entry;
+      doc.folders = [...draft.folders];
       reloadFiles();
       doc.persist();
       hideNotice();
@@ -825,8 +912,7 @@ function signIn() {
 }
 
 /** Saves the open document: an owned sketch's changes go to the server,
- * and a new sketch is saved to the visitor's account (or, signed out, in
- * this browser if they'd like). */
+ * and a new sketch is saved to the visitor's account (signing in first). */
 async function save({ quiet = false } = {}) {
   if (doc.kind === "new") return saveNew();
   if (!doc.canSave || !doc.isDirty()) return;
@@ -841,7 +927,6 @@ async function save({ quiet = false } = {}) {
       updateBar();
     }
     if (!quiet) toast("Saved");
-    refreshRemoteSketches();
     refreshThumbnail(sketch.id);
   } catch (error) {
     updateBar();
@@ -850,98 +935,50 @@ async function save({ quiet = false } = {}) {
 }
 
 async function saveNew() {
-  if (!user) {
-    const choice = await chooseSignedOutSave();
-    if (choice === "sign-in") signIn();
-    if (choice === "local") {
-      const local = createLocalSketch(doc.files, doc.entry);
-      forgetNewDraft();
-      fillMenu();
-      openDoc(localDoc(local.id, catalog.newSketch));
-      toast(`Saved as “${local.title}” in this browser`);
-    }
-    return;
+  if (!user) return signIn();
+  let title = doc.title;
+  if (title === "Untitled sketch") {
+    title = await promptText({
+      title: "Save sketch",
+      label: "Name",
+      value: title,
+      confirm: "Save",
+      validate: (value) => (value ? null : "A sketch needs a name."),
+    });
+    if (!title) return;
   }
-  const title = await promptText({
-    title: "Save sketch",
-    label: "Name",
-    value: "Untitled sketch",
-    confirm: "Save",
-    validate: (value) => (value ? null : "A sketch needs a name."),
-  });
-  if (!title) return;
   try {
-    const sketch = await api.createSketch({ title, ...doc.forServer() });
-    forgetNewDraft();
+    const saving = doc;
+    const sketch = await api.createSketch({ title, ...saving.forServer() });
+    forgetDraft(saving);
     page.sketch = sketch;
     openDoc(sketchDoc(sketch).doc, { run: true });
     toast("Saved. It's private until you change its visibility in About.");
-    refreshRemoteSketches();
     refreshThumbnail(sketch.id);
   } catch (error) {
     toast(error.message, "error");
   }
 }
 
-/** Asks a signed-out visitor how to save: "sign-in", "local", or null. */
-function chooseSignedOutSave() {
-  const dialog = $("save-dialog");
-  dialog.returnValue = "";
-  dialog.showModal();
-  return new Promise((resolve) =>
-    dialog.addEventListener("close", () => resolve(dialog.returnValue || null), { once: true }),
-  );
-}
-
-/** Saves a copy of the open document as a new sketch of the visitor's (in
- * this browser when signed out). */
+/** Saves a copy of the open sketch as a new sketch of the visitor's. */
 async function fork() {
-  const title =
-    doc.kind === "sketch" ? `Fork of ${doc.title}` : doc.kind === "example" ? doc.title : doc.title;
-  if (!user) {
-    const local = createLocalSketch(doc.files, doc.entry, title);
-    fillMenu();
-    openDoc(localDoc(local.id, catalog.newSketch), { run: true });
-    toast("Saved a copy in this browser. Sign in to save sketches to an account.");
-    return;
-  }
+  if (!user) return signIn();
+  if (doc.kind !== "sketch") return;
   try {
-    const sketch =
-      doc.kind === "sketch"
-        ? await api.forkSketch(doc.id, { title, ...doc.forServer() })
-        : await api.createSketch({ title, ...doc.forServer() });
-    if (doc.kind === "sketch" || doc.kind === "example") doc.revert();
+    const forked = doc;
+    const sketch = await api.forkSketch(forked.id, { title: `Fork of ${forked.title}`, ...forked.forServer() });
+    forked.revert();
     page.sketch = sketch;
     openDoc(sketchDoc(sketch).doc, { run: true });
     toast("Saved your copy. It's private until you change its visibility in About.");
-    refreshRemoteSketches();
     refreshThumbnail(sketch.id);
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
-/** Moves a sketch kept in this browser to the visitor's account. */
-async function saveToAccount() {
-  if (doc.kind !== "local") return;
-  if (!user) return signIn();
-  try {
-    const local = doc;
-    const sketch = await api.createSketch({ title: local.title, ...local.forServer() });
-    deleteLocalSketch(local.id);
-    page.sketch = sketch;
-    openDoc(sketchDoc(sketch).doc, { run: true });
-    fillMenu();
-    refreshRemoteSketches();
-    refreshThumbnail(sketch.id);
-    toast("Saved to your account. It's private until you change its visibility in About.");
   } catch (error) {
     toast(error.message, "error");
   }
 }
 
 async function renameDoc() {
-  if (!(doc.kind === "local" || doc.canSave)) return;
+  if (!(doc.kind === "new" || doc.canSave)) return;
   const title = await promptText({
     title: "Rename sketch",
     label: "Name",
@@ -950,35 +987,23 @@ async function renameDoc() {
     validate: (value) => (value ? null : "A sketch needs a name."),
   });
   if (!title || title === doc.title) return;
-  if (doc.kind === "local") {
-    renameLocalSketch(doc.id, title);
-  } else {
+  if (doc.kind === "sketch") {
     try {
       const sketch = await api.updateSketch(doc.id, { title });
       doc.sketch = { ...doc.sketch, title: sketch.title, updated_at: sketch.updated_at };
       // The draft (if any) was made from the version before the rename.
       doc.persist();
-      refreshRemoteSketches();
     } catch (error) {
       toast(error.message, "error");
       return;
     }
   }
   doc.title = title;
-  menu.setCurrent(doc.title, { kind: doc.kind, id: doc.id });
   document.title = `${doc.title} — easl`;
-  fillMenu();
   social.show(doc);
 }
 
 async function deleteDoc() {
-  if (doc.kind === "local") {
-    if (!confirm(`Delete “${doc.title}” from this browser? This can't be undone.`)) return;
-    deleteLocalSketch(doc.id);
-    fillMenu();
-    openTarget({ kind: "example", id: catalog.default ?? examples[0].id });
-    return;
-  }
   if (!doc.canSave) return;
   if (!confirm(`Delete “${doc.title}”? Its comments and likes go too. This can't be undone.`)) return;
   try {
@@ -991,11 +1016,7 @@ async function deleteDoc() {
 }
 
 function revert() {
-  const message =
-    doc.kind === "example"
-      ? "Discard your changes to this example?"
-      : "Discard the changes you haven't saved?";
-  if (!confirm(message)) return;
+  if (!confirm("Discard the changes you haven't saved?")) return;
   doc.revert();
   reloadFiles();
 }
@@ -1042,7 +1063,6 @@ async function shareLink() {
 
 $("save").addEventListener("click", () => save());
 $("fork").addEventListener("click", () => fork());
-$("rename").addEventListener("click", () => renameDoc());
 $("reset").addEventListener("click", () => revert());
 $("share").addEventListener("click", () => shareLink());
 
@@ -1062,7 +1082,6 @@ document.addEventListener("keydown", (event) => {
 const social = new Social(user, {
   save: () => save(),
   fork: () => fork(),
-  saveToAccount: () => saveToAccount(),
   renameDoc: () => renameDoc(),
   deleteDoc: () => deleteDoc(),
   signIn,
@@ -1104,46 +1123,17 @@ function renderAccount() {
 setUpSplitters();
 setUpHelp();
 renderAccount();
-fillMenu();
-refreshRemoteSketches();
 if (!supportsWebGPU) {
   document.body.classList.add("no-webgpu");
   $("run").disabled = true;
 }
 runner.setState("stopped");
 
-function initialDoc() {
-  if (page.mode === "sketch" && page.sketch) {
-    const { doc: opened, staleDraft } = sketchDoc(page.sketch);
-    return { doc: opened, staleDraft };
-  }
-  if (page.mode === "new") return { doc: newDoc(catalog.newSketch) };
-  if (linkedExample) return { doc: exampleDoc(linkedExample) };
-  const params = new URLSearchParams(location.search);
-  const local = params.get("local");
-  if (local) {
-    const opened = localDoc(local, catalog.newSketch);
-    if (opened) return { doc: opened };
-  }
-  const last = storage.get("last");
-  if (!page.example && last?.startsWith("local:")) {
-    const opened = localDoc(last.slice("local:".length), catalog.newSketch);
-    if (opened) return { doc: opened };
-  }
-  for (const id of [page.example, last, catalog.default]) {
-    if (id && examplesById.has(id)) return { doc: exampleDoc(examplesById.get(id)) };
-  }
-  return { doc: exampleDoc(examples[0]) };
+if (page.mode === "sketch" && page.sketch) {
+  const { doc: opened, staleDraft } = sketchDoc(page.sketch);
+  openDoc(opened, { run: true });
+  if (staleDraft) offerStaleDraft(staleDraft);
+} else {
+  openDoc(newDoc(starter, linkedCode), { run: true });
 }
-
-const initial = initialDoc();
-openDoc(initial.doc, { run: true });
-if (initial.staleDraft) offerStaleDraft(initial.staleDraft);
 editor.focus();
-
-// Signed-out visitors' unsaved new sketches come back after signing in;
-// say so where it matters.
-if (page.mode === "new" && user && doc.isDirty()) {
-  toast("Your unsaved sketch is still here. Save it to your account with ⌘S.");
-}
-

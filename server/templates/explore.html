@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Explore</h1>
-  <form class="search" method="get" action="/explore" role="search">
+  <form class="search" method="get" action="/" role="search">
     <input type="hidden" name="sort" value="{{ sort }}">
     <label class="visually-hidden" for="search-input">Search sketches</label>
     <input id="search-input" type="search" name="q" value="{{ q }}" placeholder="Search sketches and people" maxlength="100">
@@ -25,10 +25,10 @@
 <div class="empty">
   {% if q %}
   <p>No sketches match “{{ q }}”.</p>
-  <p><a href="/explore?sort={{ sort }}">Clear the search</a></p>
+  <p><a href="/?sort={{ sort }}">Clear the search</a></p>
   {% elif pages.number > 1 %}
   <p>There’s nothing on this page.</p>
-  <p><a href="/explore?sort={{ sort }}">Back to the first page</a></p>
+  <p><a href="/?sort={{ sort }}">Back to the first page</a></p>
   {% else %}
   <p>No sketches have been published yet.</p>
   <p><a class="button primary" href="/new">Make the first one</a></p>

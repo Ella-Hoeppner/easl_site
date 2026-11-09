@@ -6,6 +6,6 @@
   <p class="status-code">{{ status }}</p>
   <h1>{% if status == 404 %}Nothing here{% else %}{{ title }}{% endif %}</h1>
   <p>{% if status == 404 %}This page doesn’t exist, or it isn’t shared with you.{% else %}{{ message }}{% endif %}</p>
-  <p><a class="button" href="/explore">Explore sketches</a> <a class="button" href="/">Home</a></p>
+  <p><a class="button" href="{{ app_base }}/">Explore sketches</a> <a class="button" href="{{ docs_origin }}/">The docs</a></p>
 </section>
 {% endblock %}

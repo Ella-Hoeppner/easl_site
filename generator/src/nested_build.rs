@@ -1,4 +1,4 @@
-//! Running other builds (the web runtime, the playground's analysis crate)
+//! Running other builds (the web runtime, the editor's analysis crate)
 //! from inside the generator's own `cargo run`.
 
 use std::{ffi::OsStr, process::Command};

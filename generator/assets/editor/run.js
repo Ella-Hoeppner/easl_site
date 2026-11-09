@@ -26,8 +26,12 @@ export class Runner {
   setState(state) {
     this.state = state;
     document.body.dataset.run = state;
-    $("pause").textContent = state === "paused" ? "Resume" : "Pause";
-    $("pause").disabled = state !== "running" && state !== "paused";
+    const pause = $("pause");
+    const resuming = state === "paused";
+    pause.title = resuming ? "Resume" : "Pause";
+    pause.setAttribute("aria-label", pause.title);
+    pause.classList.toggle("resume", resuming);
+    pause.disabled = state !== "running" && state !== "paused";
     $("stop").disabled = state !== "running" && state !== "paused";
     this.onState?.(state);
   }
@@ -173,15 +177,33 @@ export class Runner {
   }
 }
 
+// More entry points than this are offered in a dropdown.
+const MAX_ENTRY_BUTTONS = 3;
+
+const entryLabel = (entry, multipleFiles) =>
+  multipleFiles ? `${entry.file} · ${entry.name}` : entry.name;
+
 /**
- * The bar above the canvas: the document's `@cpu` entry points, the one
- * that runs highlighted. Choosing one calls `choose(entry)`.
+ * The right side of the bar above the canvas: the document's `@cpu` entry
+ * points, the one that runs highlighted (as buttons, or a dropdown when
+ * there are more than a few). Choosing one calls `choose(entry)`.
  */
 export function renderEntries(host, { entries, current, multipleFiles, choose }) {
   if (entries.length === 0) {
     host.replaceChildren(
       el("span", { className: "entries-empty" }, "No ", el("code", {}, "@cpu"), " entry point"),
     );
+    return;
+  }
+  if (entries.length > MAX_ENTRY_BUTTONS) {
+    const index = entries.findIndex((e) => e.file === current?.file && e.name === current?.name);
+    const select = el("select", {
+      className: "entry-select",
+      title: "The entry point to run",
+      onchange: () => choose(entries[select.selectedIndex]),
+    }, ...entries.map((entry, i) =>
+      el("option", { value: String(i), selected: i === index }, entryLabel(entry, multipleFiles))));
+    host.replaceChildren(el("label", { className: "entry-select-label" }, "Entry ", select));
     return;
   }
   host.replaceChildren(
@@ -195,7 +217,6 @@ export function renderEntries(host, { entries, current, multipleFiles, choose })
           attrs: { "aria-pressed": String(selected) },
           onclick: () => choose(entry),
         },
-        el("span", { className: "entry-play", attrs: { "aria-hidden": "true" } }, "▶"),
         multipleFiles ? el("span", { className: "entry-file" }, `${entry.file} · `) : null,
         entry.name,
       );

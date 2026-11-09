@@ -50,7 +50,7 @@ pub async fn send_verification(
 ) -> Result<String, AppError> {
   let token =
     create_email_token(&state.db, user.id, TokenPurpose::Verify).await?;
-  let link = state.config.absolute_url(&format!("/verify/{token}"));
+  let link = state.config.editor_url(&format!("/verify/{token}"));
   state
     .mailer
     .send(verification_email(&user.email, &user.username, &link));
@@ -307,7 +307,7 @@ pub async fn forgot(
   {
     let token =
       create_email_token(&state.db, user.id, TokenPurpose::Reset).await?;
-    let url = state.config.absolute_url(&format!("/reset/{token}"));
+    let url = state.config.editor_url(&format!("/reset/{token}"));
     state
       .mailer
       .send(reset_email(&user.email, &user.username, &url));

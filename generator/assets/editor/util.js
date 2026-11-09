@@ -14,8 +14,13 @@ export function el(tag, props = {}, ...children) {
   const element = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {
     if (value === undefined || value === null) continue;
-    if (key === "dataset" || key === "style") {
-      Object.assign(element[key], value);
+    if (key === "dataset") {
+      Object.assign(element.dataset, value);
+    } else if (key === "style") {
+      // Custom properties (`--depth`) can only be set with setProperty.
+      for (const [name, style] of Object.entries(value)) {
+        element.style.setProperty(name.startsWith("--") ? name : name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`), String(style));
+      }
     } else if (key === "attrs") {
       for (const [name, attr] of Object.entries(value)) {
         element.setAttribute(name, attr);
@@ -30,7 +35,7 @@ export function el(tag, props = {}, ...children) {
 
 // ---- storage ----
 
-const STORAGE_PREFIX = "easl-playground:";
+const STORAGE_PREFIX = "easl-editor:";
 
 /** The browser's localStorage, which may be unavailable (private windows,
  * blocked site data): reads then find nothing and writes do nothing. */

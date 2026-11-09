@@ -22,7 +22,7 @@ mod highlight;
 mod landing;
 mod live_preview;
 mod nested_build;
-mod playground;
+mod editor;
 
 /// One page of the site, in nav order.
 struct PageSpec {
@@ -32,35 +32,31 @@ struct PageSpec {
   nav_title: &'static str,
   /// which sidebar section the page belongs to
   section: &'static str,
-  /// the playground menu entry listing the page's live previews (as Part 1,
-  /// Part 2, …), when it isn't `nav_title`
-  playground_menu: Option<&'static str>,
+  /// the title of the page's live previews as sketches in the editor
+  /// (followed by ": Part 1", ": Part 2", …), when it isn't `nav_title`
+  preview_title: Option<&'static str>,
 }
 
 const PAGES: &[PageSpec] = &[
-  PageSpec { source: "guide.md", nav_title: "Overview", section: "Guide", playground_menu: None },
-  PageSpec { source: "language.md", nav_title: "Language guide", section: "Guide", playground_menu: None },
-  PageSpec { source: "shaders.md", nav_title: "Writing shaders", section: "Guide", playground_menu: None },
-  PageSpec { source: "cpu.md", nav_title: "The CPU runtime", section: "Guide", playground_menu: None },
-  PageSpec { source: "raymarch.md", nav_title: "Ray marching", section: "Walkthroughs", playground_menu: Some("Raymarcher") },
-  PageSpec { source: "reference/overview.md", nav_title: "Builtin reference", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/operators.md", nav_title: "Operators", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/math.md", nav_title: "Math functions", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/vectors.md", nav_title: "Vectors", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/matrices.md", nav_title: "Matrices", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/conversions.md", nav_title: "Conversions & bits", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/arrays.md", nav_title: "Arrays", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/textures.md", nav_title: "Textures", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/gpu-builtins.md", nav_title: "GPU builtins", section: "Reference", playground_menu: None },
-  PageSpec { source: "reference/cpu-builtins.md", nav_title: "CPU builtins", section: "Reference", playground_menu: None },
+  PageSpec { source: "guide.md", nav_title: "Overview", section: "Guide", preview_title: None },
+  PageSpec { source: "language.md", nav_title: "Language guide", section: "Guide", preview_title: None },
+  PageSpec { source: "shaders.md", nav_title: "Writing shaders", section: "Guide", preview_title: None },
+  PageSpec { source: "cpu.md", nav_title: "The CPU runtime", section: "Guide", preview_title: None },
+  PageSpec { source: "raymarch.md", nav_title: "Ray marching", section: "Walkthroughs", preview_title: Some("Raymarcher") },
+  PageSpec { source: "reference/overview.md", nav_title: "Builtin reference", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/operators.md", nav_title: "Operators", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/math.md", nav_title: "Math functions", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/vectors.md", nav_title: "Vectors", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/matrices.md", nav_title: "Matrices", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/conversions.md", nav_title: "Conversions & bits", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/arrays.md", nav_title: "Arrays", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/textures.md", nav_title: "Textures", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/gpu-builtins.md", nav_title: "GPU builtins", section: "Reference", preview_title: None },
+  PageSpec { source: "reference/cpu-builtins.md", nav_title: "CPU builtins", section: "Reference", preview_title: None },
 ];
 
-/// The gallery of everyone's published sketches (a route of the site's
-/// server), relative to the site root.
-const EXPLORE_PAGE: &str = "explore";
-
-/// The sidebar section the playground's link closes.
-const PLAYGROUND_SECTION: &str = "Walkthroughs";
+/// The sidebar section the editor's links close.
+const EDITOR_SECTION: &str = "Walkthroughs";
 
 /// The generated function-index page; gets a nav entry at the end of the
 /// Reference section.
@@ -159,18 +155,18 @@ fn main() {
 
   landing::generate(&site_dir);
 
-  // The playground offers the landing page's program, then the programs in
-  // `pages/playground/`, then each page's live previews, numbered in one
-  // submenu per page.
+  // The editor has the landing page's program, the programs in
+  // `pages/editor/`, and each page's live previews (numbered, as parts of
+  // the page) as sketches.
   let mut examples = vec![landing::hero_example()];
-  examples.extend(playground::extra_examples());
+  examples.extend(editor::extra_examples());
   for (spec, page) in PAGES.iter().zip(&rendered) {
-    let menu = spec.playground_menu.unwrap_or(spec.nav_title);
+    let title = spec.preview_title.unwrap_or(spec.nav_title);
     for (i, preview) in page.previews.iter().enumerate() {
-      examples.push(preview.example(&pages_dir, menu, i + 1));
+      examples.push(preview.example(&pages_dir, title, spec.nav_title, i + 1));
     }
   }
-  playground::generate(&site_dir, examples, landing::HERO_EXAMPLE);
+  editor::generate(&site_dir, examples);
 
   let distinct_names = fn_entries
     .iter()
@@ -292,15 +288,15 @@ fn render_page(
         }
         let mut words = lang.split_whitespace();
         let lang = words.next().unwrap_or("");
-        let no_playground = words.any(|word| word == "no-playground");
+        let no_editor = words.any(|word| word == "no-editor");
         let block = if lang == "easl" {
-          // A whole program gets a link that opens it in the playground,
-          // unless its fence says `easl no-playground`.
-          let link = if !no_playground && playground::is_runnable(&code) {
+          // A whole program gets a link that opens it in the editor, unless
+          // its fence says `easl no-editor`.
+          let link = if !no_editor && editor::is_runnable(&code) {
             format!(
-              "<p class=\"code-playground\"><a href=\"{}\">Open in the \
-               playground</a></p>\n",
-              playground::code_link(prefix, &code)
+              "<p class=\"code-editor\"><a href=\"{}\">Open in the \
+               editor</a></p>\n",
+              editor::code_link(&code)
             )
           } else {
             String::new()
@@ -384,6 +380,9 @@ fn render_page(
 /// Rewrite relative links between markdown files into links between the
 /// generated html files. External links pass through untouched.
 fn rewrite_md_link<'a>(dest: &CowStr<'a>) -> CowStr<'a> {
+  if let Some(editor_link) = editor::rewrite_editor_link(dest) {
+    return CowStr::from(editor_link);
+  }
   if dest.starts_with("http://") || dest.starts_with("https://") {
     return dest.clone();
   }
@@ -524,11 +523,11 @@ fn wrap_in_template(
   let mut current_section = "";
   for (spec, page) in PAGES.iter().zip(all_pages) {
     if spec.section != current_section {
-      if current_section == PLAYGROUND_SECTION {
+      if current_section == EDITOR_SECTION {
+        let editor = editor::editor_origin();
         nav.push_str(&format!(
-          "<li><a href=\"{prefix}{}\">Playground</a></li>\n\
-           <li><a href=\"{prefix}{EXPLORE_PAGE}\">Explore sketches</a></li>\n",
-          playground::PLAYGROUND_PAGE
+          "<li><a href=\"{editor}/new\">Editor</a></li>\n\
+           <li><a href=\"{editor}/\">Explore sketches</a></li>\n"
         ));
       }
       if !current_section.is_empty() {

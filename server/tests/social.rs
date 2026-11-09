@@ -430,3 +430,93 @@ async fn playlist_navigation_on_sketch_pages() {
     .page_json();
   assert!(other["playlist"].is_null());
 }
+
+#[tokio::test]
+async fn making_a_playlist_from_the_profile() {
+  let app = TestApp::new().await;
+  let mut alice = app.user("alice").await;
+  // An empty Playlists tab invites making one.
+  let tab = alice.get("/u/alice?tab=playlists").await.page();
+  assert!(tab.contains("href=\"/playlists/new\""));
+  assert!(tab.contains("New playlist"));
+  // Others' tabs don't.
+  let mut bob = app.user("bob").await;
+  let others = bob.get("/u/alice?tab=playlists").await.page();
+  assert!(others.contains("No playlists yet."));
+  assert!(!others.contains("+ New playlist"));
+
+  let form = alice.get("/playlists/new").await;
+  assert_eq!(form.status, StatusCode::OK);
+  assert!(form.page().contains("<option value=\"public\" selected>"));
+
+  let made = alice
+    .post_form(
+      "/playlists/new",
+      &[
+        ("title", "  Late night  "),
+        ("description", "Slow ones."),
+        ("visibility", "public"),
+      ],
+    )
+    .await;
+  assert_eq!(made.status, StatusCode::SEE_OTHER);
+  let location = made.location();
+  let id = location.strip_prefix("/p/").expect("a playlist page");
+  let page = alice.get(&location).await;
+  assert_eq!(page.status, StatusCode::OK);
+  assert!(page.page().contains("Late night"));
+  let playlist = bob
+    .api(Method::GET, &format!("/api/playlists/{id}"), Value::Null)
+    .await
+    .json();
+  assert_eq!(playlist["title"], "Late night");
+  assert_eq!(playlist["visibility"], "public");
+  assert_eq!(playlist["description"], "Slow ones.");
+  // Now the tab lists it, with the button above.
+  let tab = alice.get("/u/alice?tab=playlists").await.page();
+  assert!(tab.contains("Late night"));
+  assert!(tab.contains("href=\"/playlists/new\""));
+
+  // Mistakes show the form again with the values kept.
+  let empty = alice
+    .post_form(
+      "/playlists/new",
+      &[
+        ("title", " "),
+        ("description", "kept"),
+        ("visibility", "private"),
+      ],
+    )
+    .await;
+  assert_eq!(empty.status, StatusCode::BAD_REQUEST);
+  let text = empty.page();
+  assert!(text.contains("role=\"alert\""));
+  assert!(text.contains(">kept</textarea>"));
+}
+
+#[tokio::test]
+async fn making_a_playlist_needs_an_account_and_a_verified_email_to_publish() {
+  let app = TestApp::new().await;
+  let mut anonymous = app.client();
+  let form = anonymous.get("/playlists/new").await;
+  assert_eq!(form.status, StatusCode::SEE_OTHER);
+  assert!(form.location().starts_with("/login?next="));
+
+  let mut carol = app.unverified_user("carol").await;
+  let form = carol.get("/playlists/new").await.page();
+  assert!(form.contains("<option value=\"private\" selected>"));
+  let public = carol
+    .post_form(
+      "/playlists/new",
+      &[("title", "Mine"), ("visibility", "public")],
+    )
+    .await;
+  assert_eq!(public.status, StatusCode::FORBIDDEN);
+  let private = carol
+    .post_form(
+      "/playlists/new",
+      &[("title", "Mine"), ("visibility", "private")],
+    )
+    .await;
+  assert_eq!(private.status, StatusCode::SEE_OTHER);
+}

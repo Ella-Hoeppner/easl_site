@@ -137,7 +137,7 @@ async fn banned_users() {
     .await;
   assert_eq!(login.status, StatusCode::FORBIDDEN);
   assert!(again.cookie.is_none());
-  let explore = alice.get("/explore").await.text();
+  let explore = alice.get("/").await.text();
   assert!(!explore.contains("Bob&#x27;s sketch"));
   assert!(explore.contains("Alice&#x27;s sketch"));
   assert_eq!(alice.get("/u/bob").await.status, StatusCode::NOT_FOUND);
@@ -173,5 +173,5 @@ async fn banned_users() {
     .post_form("/login", &[("login", "bob"), ("password", PASSWORD)])
     .await;
   assert_eq!(login.status, StatusCode::SEE_OTHER);
-  assert!(alice.get("/explore").await.page().contains("Bob's sketch"));
+  assert!(alice.get("/").await.page().contains("Bob's sketch"));
 }

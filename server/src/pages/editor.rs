@@ -1,12 +1,13 @@
-//! The editor pages (`/playground`, `/new`, `/s/{id}`), which all render
-//! `editor.html`.
+//! The editor pages (`/new`, `/s/{id}`), which both render `editor.html`.
 //!
-//! Besides the base context, the template gets:
+//! Besides the base context (which includes `docs_origin`), the template
+//! gets:
 //!
 //! - `page_json`: JSON for a `<script type="application/json">` element,
 //!   already safe there (`<`, `>`, `&`, and the line separators are escaped):
-//!   `{"mode", "user", "sketch", "example", "playlist", "csrf_ok"}`
-//! - `asset_version` and `monaco_version`, from the playground manifest
+//!   `{"mode": "new" | "sketch", "user", "sketch", "playlist",
+//!   "editor_origin", "docs_origin", "csrf_ok"}`
+//! - `asset_version` and `monaco_version`, from the editor manifest
 //! - `page_title`, and `og` = `{title, description, image, url}` for link
 //!   previews (`image` is absolute or none)
 
@@ -16,7 +17,7 @@ use minijinja::{Value, context};
 use serde::{Deserialize, Serialize};
 
 use super::{PageContext, html_response, render_html};
-use crate::auth::{CurrentUser, Viewer};
+use crate::auth::Viewer;
 use crate::config::Limit;
 use crate::error::{AppError, PageResult};
 use crate::playlists::{self, PlaylistPosition};
@@ -30,21 +31,34 @@ use crate::users::Me;
 const SITE_DESCRIPTION: &str = "Write easl in your browser and run it live: \
   shaders, compute, and the CPU code that drives them, all in one program.";
 
-/// The longest example id passed through, in characters.
-const MAX_EXAMPLE_ID_CHARS: usize = 100;
-
 /// A view is counted at most once per viewer and sketch in this window.
 const VIEW_WINDOW: Limit = Limit::new(1, 60 * 60);
 
 /// The data the editor's script reads.
 #[derive(Serialize)]
-struct PageData {
+struct PageData<'a> {
   mode: &'static str,
   user: Option<Me>,
   sketch: Option<Sketch>,
-  example: Option<String>,
   playlist: Option<PlaylistPosition>,
+  editor_origin: &'a str,
+  docs_origin: &'a str,
   csrf_ok: bool,
+}
+
+impl<'a> PageData<'a> {
+  /// The data of a page in `mode`, with nothing loaded yet.
+  fn new(state: &'a AppState, page: &PageContext, mode: &'static str) -> Self {
+    PageData {
+      mode,
+      user: page.user.as_ref().map(|u| u.me()),
+      sketch: None,
+      playlist: None,
+      editor_origin: &state.config.editor_origin,
+      docs_origin: &state.config.docs_origin,
+      csrf_ok: true,
+    }
+  }
 }
 
 /// Link-preview metadata.
@@ -108,59 +122,17 @@ fn render_editor(
   Ok(html_response(StatusCode::OK, body, false))
 }
 
-fn me(user: Option<&CurrentUser>) -> Option<Me> {
-  user.map(|u| u.me())
-}
-
-#[derive(Deserialize)]
-pub struct PlaygroundQuery {
-  example: Option<String>,
-}
-
-/// `GET /playground?example=<id>`.
-pub async fn playground(
-  State(state): State<AppState>,
-  page: PageContext,
-  Query(query): Query<PlaygroundQuery>,
-) -> PageResult {
-  let example = query
-    .example
-    .filter(|id| !id.is_empty() && id.chars().count() <= MAX_EXAMPLE_ID_CHARS);
-  let data = PageData {
-    mode: "playground",
-    user: me(page.user.as_ref()),
-    sketch: None,
-    example,
-    playlist: None,
-    csrf_ok: true,
-  };
-  let og = OpenGraph {
-    title: "easl playground".into(),
-    description: SITE_DESCRIPTION.into(),
-    image: None,
-    url: state.config.absolute_url("/playground"),
-  };
-  render_editor(&state, &page, &data, "Playground — easl", og)
-}
-
 /// `GET /new`: an empty editor for a new sketch.
 pub async fn new_sketch(
   State(state): State<AppState>,
   page: PageContext,
 ) -> PageResult {
-  let data = PageData {
-    mode: "new",
-    user: me(page.user.as_ref()),
-    sketch: None,
-    example: None,
-    playlist: None,
-    csrf_ok: true,
-  };
+  let data = PageData::new(&state, &page, "new");
   let og = OpenGraph {
     title: "New sketch — easl".into(),
     description: SITE_DESCRIPTION.into(),
     image: None,
-    url: state.config.absolute_url("/new"),
+    url: state.config.editor_url("/new"),
   };
   render_editor(&state, &page, &data, "New sketch — easl", og)
 }
@@ -206,17 +178,14 @@ pub async fn sketch(
   let og = OpenGraph {
     title: format!("{} — easl", sketch.summary.title),
     description,
-    image: Some(state.config.absolute_url(&sketch.summary.thumbnail_url)),
-    url: state.config.absolute_url(&sketch.summary.url),
+    image: Some(state.config.editor_url(&sketch.summary.thumbnail_url)),
+    url: state.config.editor_url(&sketch.summary.url),
   };
   let page_title = format!("{} — easl", sketch.summary.title);
   let data = PageData {
-    mode: "sketch",
-    user: me(page.user.as_ref()),
     sketch: Some(sketch),
-    example: None,
     playlist,
-    csrf_ok: true,
+    ..PageData::new(&state, &page, "sketch")
   };
   render_editor(&state, &page, &data, &page_title, og)
 }

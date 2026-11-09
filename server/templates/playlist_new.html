@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}New playlist — easl{% endblock %}
+{% block page_class %} narrow{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>New playlist</h1>
+  <p class="hint">Collect sketches to watch one after another. Add sketches from their pages, or from the playlist once it exists.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form class="stack" method="post" action="/playlists/new">
+    <label>Name
+      <input name="title" value="{{ title }}" maxlength="100" required autofocus>
+    </label>
+    <label>Description <span class="dim">(optional)</span>
+      <textarea name="description" rows="3" maxlength="2000">{{ description }}</textarea>
+    </label>
+    <label>Who can see it
+      <select name="visibility">
+        {% for v, label in [("public", "Public: listed on your profile"), ("unlisted", "Unlisted: anyone with the link"), ("private", "Private: only you")] %}
+        <option value="{{ v }}"{% if v == visibility %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if not me.email_verified %}<p class="hint">Verify your email address to make a public playlist.</p>{% endif %}
+    <div class="row">
+      <button type="submit" class="primary">Create playlist</button>
+      <a class="button" href="/u/{{ me.username }}?tab=playlists">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

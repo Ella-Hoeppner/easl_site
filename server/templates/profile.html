@@ -23,6 +23,11 @@
   {% endfor %}
 </nav>
 {% if tab == "playlists" %}
+  {% if own and playlists %}
+  <div class="tab-actions">
+    <a class="button primary" href="/playlists/new">+ New playlist</a>
+  </div>
+  {% endif %}
   {% if playlists %}
   <ul class="playlist-list">
     {% for p in playlists %}
@@ -34,7 +39,14 @@
     {% endfor %}
   </ul>
   {% else %}
-  <div class="empty"><p>{% if own %}You haven’t made any playlists yet. Add sketches to one from a sketch’s page.{% else %}No playlists yet.{% endif %}</p></div>
+  <div class="empty">
+    {% if own %}
+    <p>Playlists collect sketches to watch one after another: your favorites, a series, a set for a show.</p>
+    <p><a class="button primary" href="/playlists/new">+ New playlist</a></p>
+    {% else %}
+    <p>No playlists yet.</p>
+    {% endif %}
+  </div>
   {% endif %}
 {% else %}
   {% if sketches %}

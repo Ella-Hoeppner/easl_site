@@ -20,6 +20,7 @@ const RESERVED_USERNAMES: &[&str] = &[
   "easl",
   "easl-lang",
   "easl-web",
+  "editor",
   "explore",
   "forgot",
   "guide",

@@ -1,5 +1,6 @@
-//! Explore, profiles, the editor pages, the static site, and request-level
-//! protections (CSRF, headers, rate limits).
+//! Explore, profiles, the editor pages, routing by host (the editor host
+//! and the docs host), and request-level protections (CSRF, headers, rate
+//! limits).
 
 mod common;
 
@@ -7,7 +8,7 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use serde_json::{Value, json};
 
-use common::{ORIGIN, PASSWORD, TestApp};
+use common::{DOCS_ORIGIN, ORIGIN, PASSWORD, TestApp};
 use easl_site_server::config::Limit;
 
 fn id_of(value: &Value) -> String {
@@ -72,39 +73,45 @@ async fn explore_sorting_search_and_pages() {
   let mut client = app.client();
   let titles = |html: String| card_titles(&html);
   assert_eq!(
-    titles(client.get("/explore").await.text()),
+    titles(client.get("/").await.text()),
     ["Newest fractal", "Middle", "Old favorite"]
   );
   assert_eq!(
-    titles(client.get("/explore?sort=popular").await.text()),
+    titles(client.get("/?sort=popular").await.text()),
     ["Old favorite", "Middle", "Newest fractal"]
   );
   assert_eq!(
-    titles(client.get("/explore?sort=trending").await.text()),
+    titles(client.get("/?sort=trending").await.text()),
     ["Middle", "Old favorite", "Newest fractal"]
   );
   assert_eq!(
-    titles(client.get("/explore?q=FRACTAL").await.text()),
+    titles(client.get("/?q=FRACTAL").await.text()),
     ["Newest fractal"]
   );
-  assert_eq!(titles(client.get("/explore?q=alice").await.text()).len(), 3);
+  assert_eq!(titles(client.get("/?q=alice").await.text()).len(), 3);
   // LIKE wildcards are literal.
-  assert!(titles(client.get("/explore?q=%25").await.text()).is_empty());
-  let none = client.get("/explore?q=zzz").await.page();
+  assert!(titles(client.get("/?q=%25").await.text()).is_empty());
+  let none = client.get("/?q=zzz").await.page();
   assert!(none.contains("No sketches match"));
   // Search text is escaped back into the page.
-  let echoed = client.get("/explore?q=%3Cscript%3E").await.text();
+  let echoed = client.get("/?q=%3Cscript%3E").await.text();
   assert!(!echoed.contains("<script>"));
 
   for i in 0..25 {
     alice.create_sketch(&format!("Bulk {i:02}"), "public").await;
   }
-  let first = client.get("/explore").await.page();
+  let first = client.get("/").await.page();
   assert_eq!(card_titles(&first).len(), 24);
-  assert!(first.contains("/explore?sort=new&amp;page=2"));
-  let second = client.get("/explore?page=2").await.text();
+  assert!(first.contains("/?sort=new&amp;page=2"));
+  let second = client.get("/?page=2").await.text();
   assert_eq!(card_titles(&second).len(), 4);
-  assert_eq!(client.get("/explore?page=-3").await.status, StatusCode::OK);
+  assert_eq!(client.get("/?page=-3").await.status, StatusCode::OK);
+
+  // The old address redirects, keeping the query.
+  let old = client.get("/explore?sort=popular&q=x").await;
+  assert_eq!(old.status, StatusCode::PERMANENT_REDIRECT);
+  assert_eq!(old.location(), "/?sort=popular&q=x");
+  assert_eq!(client.get("/explore").await.location(), "/");
 }
 
 #[tokio::test]
@@ -150,13 +157,19 @@ async fn profile_pages() {
 #[tokio::test]
 async fn header_shows_who_is_signed_in() {
   let app = TestApp::new().await;
-  let anonymous = app.client().get("/explore").await.page();
-  assert!(anonymous.contains("/login?next=/explore"));
-  assert!(anonymous.contains("Sign up"));
+  let explore = app.client().get("/?sort=new").await.page();
+  assert!(explore.contains("/login?next=/%3Fsort%3Dnew"));
+  assert!(explore.contains("Sign up"));
+  // The header links the docs by their own origin, and no playground.
+  assert!(explore.contains(&format!("href=\"{DOCS_ORIGIN}/\"")));
+  assert!(explore.contains(&format!("href=\"{DOCS_ORIGIN}/guide.html\"")));
+  assert!(explore.contains("href=\"/new\""));
+  assert!(!explore.to_lowercase().contains("playground"));
   let mut alice = app.user("alice").await;
-  let signed_in = alice.get("/explore").await.page();
+  let signed_in = alice.get("/").await.page();
   assert!(signed_in.contains("/u/alice/avatar.svg"));
   assert!(signed_in.contains("action=\"/logout\""));
+  assert!(signed_in.contains("href=\"/playlists/new\""));
   assert!(!signed_in.contains("Sign up"));
 }
 
@@ -164,27 +177,114 @@ async fn header_shows_who_is_signed_in() {
 async fn editor_pages() {
   let app = TestApp::new().await;
   let mut client = app.client();
-  let playground = client.get("/playground?example=raymarch-materials").await;
-  assert_eq!(playground.status, StatusCode::OK);
-  let data = playground.page_json();
-  assert_eq!(data["mode"], "playground");
-  assert_eq!(data["example"], "raymarch-materials");
+  let new = client.get("/new").await;
+  assert_eq!(new.status, StatusCode::OK);
+  let data = new.page_json();
+  assert_eq!(data["mode"], "new");
+  assert_eq!(data["editor_origin"], ORIGIN);
+  assert_eq!(data["docs_origin"], DOCS_ORIGIN);
   assert!(data["user"].is_null());
   assert!(data["sketch"].is_null());
+  assert!(data.get("example").is_none());
 
-  let new = client.get("/new").await.page_json();
-  assert_eq!(new["mode"], "new");
-  assert!(new["example"].is_null());
+  let mut alice = app.user("alice").await;
+  let id = id_of(&alice.create_sketch("Mine", "public").await);
+  let sketch = client.get(&format!("/s/{id}")).await;
+  let data = sketch.page_json();
+  assert_eq!(data["mode"], "sketch");
+  assert_eq!(data["sketch"]["id"], id.as_str());
+  assert_eq!(data["editor_origin"], ORIGIN);
+  // Link previews use the editor origin.
+  assert!(sketch.page().contains(&format!("{ORIGIN}/s/{id}")));
 
-  let redirect = client.get("/playground.html?example=landing").await;
-  assert_eq!(redirect.status, StatusCode::PERMANENT_REDIRECT);
-  assert_eq!(redirect.location(), "/playground?example=landing");
+  // The playground is gone from the editor host.
+  for path in ["/playground", "/playground.html", "/explore.html"] {
+    let response = client.get(path).await;
+    assert_eq!(response.status, StatusCode::NOT_FOUND, "{path}");
+  }
 }
 
 #[tokio::test]
-async fn static_site_serving() {
+async fn editor_host_serves_only_the_editor_and_runtime_files() {
   let app = TestApp::new().await;
   let mut client = app.client();
+  let home = client.get("/").await;
+  assert_eq!(home.status, StatusCode::OK);
+  assert!(home.page().contains("Explore"));
+  assert!(!home.text().contains("landing"));
+
+  let script = client.get("/editor/editor.js?v=abc123").await;
+  assert_eq!(script.status, StatusCode::OK);
+  assert_eq!(
+    script.header("cache-control").as_deref(),
+    Some("public, max-age=31536000, immutable")
+  );
+  let manifest = client.get("/editor/manifest.json").await;
+  assert_eq!(
+    manifest.header("cache-control").as_deref(),
+    Some("no-cache")
+  );
+  let wasm = client.get("/easl-web/runtime.wasm").await;
+  assert_eq!(wasm.status, StatusCode::OK);
+  assert_eq!(
+    wasm.header("content-type").as_deref(),
+    Some("application/wasm")
+  );
+  for path in ["/guide.html", "/index.html", "/editor/nope.js"] {
+    let response = client.get(path).await;
+    assert_eq!(response.status, StatusCode::NOT_FOUND, "{path}");
+    assert!(response.page().contains("Nothing here"));
+  }
+  // The host matches by name, in any case, with or without the port.
+  for host in ["EDITOR.test.local", "editor.test.local:8443"] {
+    let request = Request::builder()
+      .uri("/new")
+      .header("host", host)
+      .body(Body::empty())
+      .expect("request");
+    let response = client.send(request).await;
+    assert_eq!(response.status, StatusCode::OK, "{host}");
+  }
+}
+
+#[tokio::test]
+async fn docs_host_redirects_to_the_editor() {
+  let app = TestApp::new().await;
+  app.write_examples(json!({
+    "examples": [{
+      "id": "landing",
+      "sketch_id": "Ab3dE9xQ",
+      "title": "Landing page",
+      "description": "",
+      "files": [{"path": "main.easl", "content": "(defn main [])"}],
+    }],
+  }));
+  let mut docs = app.docs_client();
+  for (path, location) in [
+    ("/playground?example=landing", "/s/Ab3dE9xQ"),
+    ("/playground.html?example=landing", "/s/Ab3dE9xQ"),
+    ("/playground?example=nope", "/new"),
+    ("/playground", "/new"),
+    ("/explore?sort=new", "/explore?sort=new"),
+    ("/new", "/new"),
+    ("/s/Ab3dE9xQ?playlist=x", "/s/Ab3dE9xQ?playlist=x"),
+    ("/u/alice", "/u/alice"),
+    ("/p/abcdefgh", "/p/abcdefgh"),
+    ("/login?next=%2F", "/login?next=%2F"),
+    ("/signup", "/signup"),
+    ("/settings", "/settings"),
+    ("/api/me", "/api/me"),
+  ] {
+    let response = docs.get(path).await;
+    assert_eq!(response.status, StatusCode::PERMANENT_REDIRECT, "{path}");
+    assert_eq!(response.location(), format!("{ORIGIN}{location}"), "{path}");
+  }
+}
+
+#[tokio::test]
+async fn docs_host_serves_the_static_site() {
+  let app = TestApp::new().await;
+  let mut client = app.docs_client();
   let index = client.get("/").await;
   assert_eq!(index.status, StatusCode::OK);
   assert!(index.text().contains("landing"));
@@ -196,17 +296,28 @@ async fn static_site_serving() {
     versioned.header("cache-control").as_deref(),
     Some("public, max-age=31536000, immutable")
   );
-  let wasm = client.get("/runtime.wasm").await;
+  // The docs' live previews use the editor's files from here too.
+  let script = client.get("/editor/editor.js").await;
+  assert_eq!(script.status, StatusCode::OK);
+  let wasm = client.get("/easl-web/runtime.wasm").await;
   assert_eq!(
     wasm.header("content-type").as_deref(),
     Some("application/wasm")
   );
   let missing = client.get("/nope.html").await;
   assert_eq!(missing.status, StatusCode::NOT_FOUND);
-  assert!(missing.page().contains("Nothing here"));
+  let page = missing.page();
+  assert!(page.contains("Nothing here"));
+  // Its links to the app go to the editor host.
+  assert!(page.contains(&format!("href=\"{ORIGIN}/new\"")));
   let traversal = client.get("/../Cargo.toml").await;
   assert_ne!(traversal.status, StatusCode::OK);
+}
 
+#[tokio::test]
+async fn app_assets() {
+  let app = TestApp::new().await;
+  let mut client = app.client();
   let css = client.get("/static/app.css").await;
   assert_eq!(css.status, StatusCode::OK);
   assert!(
@@ -215,7 +326,7 @@ async fn static_site_serving() {
       .expect("type")
       .starts_with("text/css")
   );
-  let explore = client.get("/explore").await.page();
+  let explore = client.get("/").await.page();
   let start = explore.find("/static/app.css?v=").expect("versioned css");
   let url = &explore[start..start + explore[start..].find('"').expect("end")];
   let cached = client.get(url).await;
@@ -239,7 +350,7 @@ async fn static_site_serving() {
 async fn security_headers() {
   let app = TestApp::new().await;
   let mut client = app.client();
-  for path in ["/explore", "/", "/api/me"] {
+  for path in ["/", "/editor/editor.js", "/api/me"] {
     let response = client.get(path).await;
     assert_eq!(
       response.header("x-content-type-options").as_deref(),
@@ -254,7 +365,7 @@ async fn security_headers() {
       Some("SAMEORIGIN")
     );
   }
-  let page = client.get("/explore").await;
+  let page = client.get("/").await;
   assert_eq!(page.header("cache-control").as_deref(), Some("no-store"));
   assert!(page.header("content-security-policy").is_some());
   let avatar = client.get("/u/someone/avatar.svg").await;
@@ -335,6 +446,7 @@ async fn dev_origins_in_dev_mode() {
   for (origin, status) in [
     ("http://localhost:8100", StatusCode::OK),
     ("http://127.0.0.1:3000", StatusCode::OK),
+    ("http://editor.localhost:8150", StatusCode::OK),
     ("http://localhost.evil.example", StatusCode::FORBIDDEN),
     ("http://localhost:", StatusCode::FORBIDDEN),
   ] {

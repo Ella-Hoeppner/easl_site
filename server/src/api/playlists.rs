@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 
 use super::ApiJson;
-use crate::auth::{ApiUser, CurrentUser, MaybeUser, Viewer};
+use crate::auth::{ApiUser, MaybeUser, Viewer};
 use crate::error::{ApiResult, AppError};
 use crate::playlists::{self, Playlist};
 use crate::sketches;
@@ -42,16 +42,6 @@ pub struct Reorder {
   sketch_ids: Vec<String>,
 }
 
-fn check_visibility(
-  user: &CurrentUser,
-  visibility: Visibility,
-) -> Result<(), AppError> {
-  if visibility == Visibility::Public {
-    user.require_verified("publish playlists")?;
-  }
-  Ok(())
-}
-
 async fn detail(
   state: &AppState,
   id: &str,
@@ -70,7 +60,7 @@ pub async fn create(
 ) -> ApiResult<(StatusCode, Json<Playlist>)> {
   let viewer = Viewer::of(Some(&user));
   let visibility = body.visibility.unwrap_or(Visibility::Private);
-  check_visibility(&user, visibility)?;
+  playlists::check_visibility(&user, visibility)?;
   let title = validate::playlist_title(&body.title)?;
   let description = validate::playlist_description(&body.description)?;
   if let Some(sketch_id) = &body.sketch_id {
@@ -109,7 +99,7 @@ pub async fn update(
   let row = playlists::find_owned(&state.db, &id, &viewer).await?;
   let visibility = body.visibility.unwrap_or(row.visibility);
   if visibility != row.visibility {
-    check_visibility(&user, visibility)?;
+    playlists::check_visibility(&user, visibility)?;
   }
   let title = match &body.title {
     Some(title) => validate::playlist_title(title)?,

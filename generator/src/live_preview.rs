@@ -21,7 +21,7 @@ use std::{
 
 use easl::web_bundle::bundle_program;
 
-use crate::playground::{self, Example};
+use crate::editor::{self, Example};
 
 const MARKER: &str = "<!-- live-preview:";
 
@@ -63,13 +63,19 @@ impl LivePreview {
     })
   }
 
-  /// The program as a playground example: part `part` in the submenu
-  /// `menu`.
-  pub fn example(&self, pages_dir: &Path, menu: &str, part: usize) -> Example {
+  /// The program as an example: part `part` of `title`, from the docs page
+  /// called `page_name` in the sidebar.
+  pub fn example(
+    &self,
+    pages_dir: &Path,
+    title: &str,
+    page_name: &str,
+    part: usize,
+  ) -> Example {
     Example {
       id: example_id(&self.source),
-      menu: Some(menu.to_string()),
-      title: format!("Part {part}"),
+      title: format!("{title}: Part {part}"),
+      description: format!("Part {part} of \"{page_name}\" in the easl docs."),
       source: fs::read_to_string(pages_dir.join(&self.source)).unwrap(),
     }
   }
@@ -86,8 +92,8 @@ impl LivePreview {
       "<figure class=\"live-preview\" data-module=\"{prefix}{runtime}/{module}\">\n\
        <canvas></canvas>\n\
        {console}\
-       <a class=\"live-preview-edit\" href=\"{playground}\">Open in the \
-       playground</a>\n\
+       <a class=\"live-preview-edit\" href=\"{editor}\">Open in the \
+       editor</a>\n\
        <p class=\"live-preview-note no-webgpu-note\">This live preview needs \
        a browser with WebGPU.</p>\n\
        <p class=\"live-preview-note failed-note\">This live preview couldn't \
@@ -95,7 +101,7 @@ impl LivePreview {
        </figure>\n",
       runtime = crate::landing::RUNTIME_DIR,
       module = self.module,
-      playground = playground::link(prefix, &example_id(&self.source)),
+      editor = editor::example_link(&example_id(&self.source)),
     )
   }
 
@@ -118,7 +124,7 @@ impl LivePreview {
   }
 }
 
-/// A program's name as a playground example and a packaged module: its
+/// A program's name as an example and a packaged module: its
 /// path under `pages/` without the extension, `/` replaced by `-`.
 fn example_id(source: &Path) -> String {
   source

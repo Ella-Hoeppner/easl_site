@@ -1,9 +1,9 @@
-//! The generated static site (`--site-dir`), served at `/`, and the
-//! playground build's manifest.
+//! The generated static site (`--site-dir`): serving its files, and the
+//! editor build's manifest and example index, re-read when they change.
 
 use std::fs;
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use axum::Router;
@@ -14,16 +14,20 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use tower_http::services::ServeDir;
 
-use crate::error::PageError;
+use crate::db::is_public_id;
 use crate::pages;
 use crate::state::AppState;
 
-/// The Monaco version used when the site has no playground manifest.
+/// The Monaco version used when the site has no editor manifest.
 const DEFAULT_MONACO_VERSION: &str = "0.52.2";
 
-/// The playground build's versions, from `playground/manifest.json`.
+/// The editor build's directory in the site.
+pub const EDITOR_DIR: &str = "editor";
+
+/// The editor build's versions, from `editor/manifest.json`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Manifest {
   pub version: String,
@@ -39,81 +43,107 @@ impl Default for Manifest {
   }
 }
 
-/// One example program from `playground/examples.json`.
-#[derive(Clone, Debug, Deserialize)]
-pub struct Example {
-  pub id: String,
-  pub menu: Option<String>,
-  pub title: String,
-  pub source: String,
+/// `editor/examples.json`, where the editor build lists the docs' example
+/// programs.
+pub fn examples_path(site_dir: &Path) -> PathBuf {
+  site_dir.join(EDITOR_DIR).join("examples.json")
+}
+
+/// What the docs' redirects need from `editor/examples.json`: each
+/// example's old id and the sketch that holds it.
+#[derive(Deserialize)]
+struct ExampleIndex {
+  examples: Vec<ExampleLink>,
 }
 
 #[derive(Deserialize)]
-struct ExamplesFile {
-  examples: Vec<Example>,
+struct ExampleLink {
+  id: String,
+  sketch_id: String,
 }
 
-/// The site directory and a cache of its manifest.
+/// A JSON file parsed on demand and cached until its modification time
+/// changes, so a site rebuild needs no server restart.
+struct WatchedJson<T> {
+  path: PathBuf,
+  cache: Mutex<Option<(SystemTime, Arc<T>)>>,
+}
+
+impl<T: DeserializeOwned> WatchedJson<T> {
+  fn new(path: PathBuf) -> Self {
+    WatchedJson {
+      path,
+      cache: Mutex::new(None),
+    }
+  }
+
+  /// The file's content, or `None` when it's missing or unreadable (the
+  /// latter logged).
+  fn get(&self) -> Option<Arc<T>> {
+    let modified = fs::metadata(&self.path).and_then(|m| m.modified()).ok()?;
+    if let Ok(cache) = self.cache.lock()
+      && let Some((cached_at, value)) = cache.as_ref()
+      && *cached_at == modified
+    {
+      return Some(value.clone());
+    }
+    let parsed = fs::read_to_string(&self.path)
+      .ok()
+      .and_then(|text| serde_json::from_str::<T>(&text).ok());
+    let Some(value) = parsed.map(Arc::new) else {
+      tracing::warn!("couldn't read {}", self.path.display());
+      return None;
+    };
+    if let Ok(mut cache) = self.cache.lock() {
+      *cache = Some((modified, value.clone()));
+    }
+    Some(value)
+  }
+}
+
+/// The site directory and caches of the editor build's files.
 pub struct SiteFiles {
   pub dir: PathBuf,
-  manifest: Mutex<Option<(SystemTime, Manifest)>>,
+  manifest: WatchedJson<Manifest>,
+  examples: WatchedJson<ExampleIndex>,
 }
 
 impl SiteFiles {
   pub fn new(dir: PathBuf) -> Self {
     SiteFiles {
+      manifest: WatchedJson::new(dir.join(EDITOR_DIR).join("manifest.json")),
+      examples: WatchedJson::new(examples_path(&dir)),
       dir,
-      manifest: Mutex::new(None),
     }
   }
 
-  fn manifest_path(&self) -> PathBuf {
-    self.dir.join("playground").join("manifest.json")
-  }
-
-  /// The playground manifest, re-read whenever the file changes (a site
-  /// rebuild needs no server restart); the defaults when it's missing or
-  /// unreadable.
+  /// The editor manifest; the defaults when it's missing or unreadable.
   pub fn manifest(&self) -> Manifest {
-    let path = self.manifest_path();
-    let Ok(modified) = fs::metadata(&path).and_then(|m| m.modified()) else {
-      return Manifest::default();
-    };
-    if let Ok(cache) = self.manifest.lock()
-      && let Some((cached_at, manifest)) = cache.as_ref()
-      && *cached_at == modified
-    {
-      return manifest.clone();
-    }
-    let manifest = fs::read_to_string(&path)
-      .ok()
-      .and_then(|text| serde_json::from_str::<Manifest>(&text).ok());
-    let Some(manifest) = manifest else {
-      tracing::warn!("couldn't read {}", path.display());
-      return Manifest::default();
-    };
-    if let Ok(mut cache) = self.manifest.lock() {
-      *cache = Some((modified, manifest.clone()));
-    }
-    manifest
+    self
+      .manifest
+      .get()
+      .map(|manifest| (*manifest).clone())
+      .unwrap_or_default()
   }
 
-  /// The playground's example programs, if the site has them.
-  pub fn examples(&self) -> Vec<Example> {
-    let path = self.dir.join("playground").join("examples.json");
-    fs::read_to_string(path)
-      .ok()
-      .and_then(|text| serde_json::from_str::<ExamplesFile>(&text).ok())
-      .map(|file| file.examples)
-      .unwrap_or_default()
+  /// The id of the sketch holding the example `example_id`, if the site
+  /// lists one.
+  pub fn example_sketch(&self, example_id: &str) -> Option<String> {
+    let index = self.examples.get()?;
+    index
+      .examples
+      .iter()
+      .find(|example| example.id == example_id)
+      .map(|example| example.sketch_id.clone())
+      .filter(|id| is_public_id(id))
   }
 }
 
-/// The router serving the site directory, with the site's cache policy and
-/// the app's 404 page for missing files.
-pub fn router(state: AppState) -> Router {
+/// A router serving the files under `dir`, with the site's cache policy
+/// and the app's 404 page for missing files.
+pub fn files(state: &AppState, dir: PathBuf) -> Router {
   let not_found = not_found_page.with_state(state.clone());
-  let files = ServeDir::new(&state.site.dir)
+  let files = ServeDir::new(dir)
     .append_index_html_on_directories(true)
     .not_found_service(not_found);
   Router::new()
@@ -122,12 +152,7 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn not_found_page(State(state): State<AppState>) -> Response {
-  pages::error_response(
-    &state,
-    None,
-    StatusCode::NOT_FOUND,
-    &PageError::not_found().0.message(),
-  )
+  pages::static_not_found(&state)
 }
 
 /// Sets static files' `Cache-Control`: a year for URLs with a `v=` query

@@ -112,11 +112,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "easl_playground_analysis"
+name = "easl_editor_analysis"
 version = "0.0.0"
 dependencies = [
  "easl",
- "easl_playground_lsp_types",
+ "easl_editor_lsp_types",
  "fsexp",
  "js-sys",
  "serde_json",
@@ -124,7 +124,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "easl_playground_lsp_types"
+name = "easl_editor_lsp_types"
 version = "0.0.0"
 dependencies = [
  "lsp-types",

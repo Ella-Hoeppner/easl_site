@@ -1,5 +1,6 @@
 //! A test harness: the real router over a fresh database and site
-//! directory, a capturing mailer, and a cookie-keeping client.
+//! directory, a capturing mailer, and a cookie-keeping client that talks to
+//! the editor host unless told otherwise.
 
 #![allow(dead_code)]
 
@@ -8,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::{Body, to_bytes};
-use axum::http::header::{CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE};
+use axum::http::header::{CONTENT_TYPE, COOKIE, HOST, LOCATION, SET_COOKIE};
 use axum::http::request::Builder;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use serde_json::{Value, json};
@@ -23,7 +24,14 @@ use easl_site_server::state::AppState;
 use easl_site_server::text::url_encode;
 use easl_site_server::users;
 
-pub const ORIGIN: &str = "http://test.local";
+/// The editor (app) origin, which `Client`s send as their `Origin`.
+pub const ORIGIN: &str = "http://editor.test.local";
+/// The docs origin.
+pub const DOCS_ORIGIN: &str = "http://test.local";
+/// The editor host, which requests go to by default.
+pub const EDITOR_HOST: &str = "editor.test.local";
+/// The docs host.
+pub const DOCS_HOST: &str = "test.local";
 pub const PASSWORD: &str = "correct horse battery";
 
 /// Limits high enough that ordinary tests never hit them.
@@ -54,16 +62,21 @@ impl TestApp {
   pub async fn with_config(adjust: impl FnOnce(&mut Config)) -> Self {
     let dir = TempDir::new().expect("temp dir");
     let site = dir.path().join("site");
-    fs::create_dir_all(site.join("playground")).expect("site dir");
+    for sub in ["editor", "easl-web"] {
+      fs::create_dir_all(site.join(sub)).expect("site dir");
+    }
     fs::write(site.join("index.html"), "<h1>landing</h1>").expect("index");
     fs::write(site.join("guide.html"), "<h1>guide</h1>").expect("guide");
-    fs::write(site.join("runtime.wasm"), b"\0asm").expect("wasm");
+    fs::write(site.join("easl-web").join("runtime.wasm"), b"\0asm")
+      .expect("wasm");
+    fs::write(site.join("editor").join("editor.js"), "// editor")
+      .expect("editor");
     fs::write(
-      site.join("playground").join("manifest.json"),
+      site.join("editor").join("manifest.json"),
       r#"{"version": "abc123", "monaco_version": "0.99.0"}"#,
     )
     .expect("manifest");
-    let mut config = Config::new(site, ORIGIN, false);
+    let mut config = Config::new(site, ORIGIN, DOCS_ORIGIN, false);
     config.limits = relaxed_limits();
     adjust(&mut config);
     let pool = db::open(&dir.path().join("test.db")).await.expect("db");
@@ -77,11 +90,27 @@ impl TestApp {
     }
   }
 
+  /// A signed-out client of the editor host.
   pub fn client(&self) -> Client<'_> {
     Client {
       app: self,
       cookie: None,
+      host: EDITOR_HOST,
     }
+  }
+
+  /// A client of the docs host.
+  pub fn docs_client(&self) -> Client<'_> {
+    Client {
+      host: DOCS_HOST,
+      ..self.client()
+    }
+  }
+
+  /// Writes `editor/examples.json` into the site directory.
+  pub fn write_examples(&self, examples: Value) {
+    let path = self.state.config.site_dir.join("editor/examples.json");
+    fs::write(path, examples.to_string()).expect("examples.json");
   }
 
   /// The most recent email sent to `to`.
@@ -195,16 +224,23 @@ impl TestResponse {
   }
 }
 
-/// A browser-like client: keeps the session cookie and sends this site's
-/// `Origin` on state-changing requests.
+/// A browser-like client: keeps the session cookie, sends its host as
+/// `Host` when a request names none, and sends the app's `Origin` on
+/// state-changing requests.
 pub struct Client<'a> {
   app: &'a TestApp,
   pub cookie: Option<String>,
+  pub host: &'static str,
 }
 
 impl Client<'_> {
   pub async fn send(&mut self, request: Request<Body>) -> TestResponse {
     let mut request = request;
+    if !request.headers().contains_key(HOST) {
+      request
+        .headers_mut()
+        .insert(HOST, self.host.parse().expect("host header"));
+    }
     if let Some(cookie) = &self.cookie {
       request
         .headers_mut()

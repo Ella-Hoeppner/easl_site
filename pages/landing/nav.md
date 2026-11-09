@@ -1,6 +1,6 @@
 - [Guide](guide.md)
-- [Playground](playground.html)
-- [Explore](explore)
+- [Editor](https://editor.easl-lang.org/new)
+- [Explore](https://editor.easl-lang.org/)
 - [Reference](reference/overview.md)
 - [Functions](functions.html)
 - [GitHub](https://github.com/Ella-Hoeppner/easl)

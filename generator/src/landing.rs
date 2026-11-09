@@ -23,7 +23,7 @@ use easl::{
 use pulldown_cmark::{Event, Parser, Tag, TagEnd, html::push_html};
 
 use crate::{
-  escape_html, highlight, nested_build, playground::Example, rewrite_md_link,
+  editor::Example, escape_html, highlight, nested_build, rewrite_md_link,
 };
 
 /// The page's prose, relative to the generator's manifest directory.
@@ -145,16 +145,17 @@ fn text_blocks(source: &str) -> Vec<String> {
   blocks
 }
 
-/// The background program's name as a playground example.
+/// The background program's name as an example.
 pub const HERO_EXAMPLE: &str = "landing";
 
-/// The background program, as the playground's first example.
+/// The background program, as an example.
 pub fn hero_example() -> Example {
   let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
   Example {
     id: HERO_EXAMPLE.to_string(),
-    menu: None,
-    title: "Landing Page".to_string(),
+    title: "Landing page".to_string(),
+    description: "The program running behind easl-lang.org's front page."
+      .to_string(),
     source: read_source(&manifest_dir.join(HERO_PROGRAM_PATH)),
   }
 }

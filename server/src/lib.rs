@@ -1,6 +1,6 @@
 //! The easl site's server: accounts, sketches, playlists, comments, and
-//! moderation, with server-rendered pages and a JSON API, in front of the
-//! generated static docs site. See the README for running and deploying it.
+//! moderation, with server-rendered pages and a JSON API on the editor
+//! host, and the generated static docs site on the docs host. See the README for running and deploying it.
 
 pub mod api;
 pub mod app;
@@ -10,7 +10,9 @@ pub mod avatar;
 pub mod comments;
 pub mod config;
 pub mod db;
+pub mod docs;
 pub mod error;
+pub mod examples;
 pub mod mail;
 pub mod pages;
 pub mod playlists;

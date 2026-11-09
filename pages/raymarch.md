@@ -153,7 +153,7 @@ Now `raymarch-fragment` uses the normalized screen position to determine the dir
 
 Here's the full current program, which clocks in around 60 lines.
 
-```easl no-playground
+```easl no-editor
 (defn raymarch [sdf: (Fn [vec3f] f32)
                 ray-origin: vec3f
                 ray-direction: vec3f]: (Option vec3f)
@@ -686,7 +686,7 @@ Here we've defined a new struct type, `Shape`, which we use to bundle together a
 
 There are countless additions we could make to our raymarcher, but this tutorial has already covered the essential features of easl, so we'll end it here. Here's the final code with all the helper functions and the final multi-shape scene:
 
-```easl no-playground
+```easl no-editor
 (defn raymarch [sdf: (Fn [vec3f] f32)
                 ray-origin: vec3f
                 ray-direction: vec3f]: (Option vec3f)
