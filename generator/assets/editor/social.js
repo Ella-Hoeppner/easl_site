@@ -16,8 +16,9 @@ export class Social {
   /**
    * `user` is the signed-in visitor (or null); `actions` has the editor's
    * document operations: `save()`, `fork()`, `renameDoc()`, `deleteDoc()`,
-   * `updateThumbnail()`, and `signIn()` (the sign-in page, coming back
-   * here after).
+   * `updateThumbnail()`, `signIn()` (the sign-in page, coming back here
+   * after), and `changed()`, called when the sketch's state changes here
+   * (its visibility, which decides whether it has a draft).
    */
   constructor(user, actions) {
     this.user = user;
@@ -63,7 +64,9 @@ export class Social {
   show(doc) {
     const changed = this.doc?.key !== doc.key;
     this.doc = doc;
-    const sketch = doc.kind === "sketch" ? doc.sketch : null;
+    // A sketch's published version (its owner's read-only view of it) is
+    // still that sketch.
+    const sketch = doc.kind === "sketch" || doc.kind === "published" ? doc.sketch : null;
     const title = $("sketch-title");
     title.textContent = doc.title;
     title.disabled = !this.canRename();
@@ -121,6 +124,7 @@ export class Social {
     const panel = $("about-panel");
     switch (doc.kind) {
       case "sketch":
+      case "published":
         panel.replaceChildren(...this.aboutSketch(doc.sketch));
         break;
       default:
@@ -231,7 +235,9 @@ export class Social {
         el("span", { className: "visibility-name" }, label),
         el("span", { className: "visibility-help" }, help)));
     return el("fieldset", { className: "visibility" },
-      el("legend", { className: "field-label" }, "Visibility"), ...options, status);
+      el("legend", { className: "field-label" }, "Visibility"), ...options, status,
+      el("p", { className: "about-note" },
+        "While it's unlisted or public, what you save is a draft: its page keeps showing the published version until you publish."));
   }
 
   /** Makes the visitor's own `sketch` private, unlisted, or public. */
@@ -239,12 +245,15 @@ export class Social {
     if (value === sketch.visibility) return;
     try {
       const updated = await api.updateSketch(sketch.id, { visibility: value });
-      Object.assign(sketch, { visibility: updated.visibility, published_at: updated.published_at });
+      for (const field of ["visibility", "published_at", "published_revision", "head_revision", "has_draft"]) {
+        sketch[field] = updated[field];
+      }
       toast(value === "public" ? "Published: it's on Explore now" : `It's ${value} now`);
     } catch (error) {
       toast(error.message, "error");
     }
     this.show(this.doc);
+    this.actions.changed();
   }
 
   /** The bar's byline: the author, and the sketch's visibility (a button

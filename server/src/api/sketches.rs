@@ -1,5 +1,5 @@
-//! `/api/sketches`: creating, reading, changing, forking, and liking
-//! sketches, and uploading their thumbnails.
+//! `/api/sketches`: creating, reading, changing, publishing, forking, and
+//! liking sketches, their revisions, and uploading their thumbnails.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -14,7 +14,10 @@ use super::{ApiJson, nullable};
 use crate::auth::{ApiUser, CurrentUser, MaybeUser, Viewer};
 use crate::error::{ApiResult, AppError};
 use crate::ratelimit::Action;
-use crate::sketches::{self, NewSketch, Sketch, SketchRow, SketchUpdate};
+use crate::revisions::{self, Contents};
+use crate::sketches::{
+  self, NewSketch, Published, Sketch, SketchRow, SketchUpdate,
+};
 use crate::state::AppState;
 use crate::validate::{self, SketchFile};
 use crate::visibility::Visibility;
@@ -33,7 +36,8 @@ pub struct CreateSketch {
 }
 
 /// The body of `PUT /api/sketches/{id}`; absent fields stay as they are,
-/// and `null` clears the entry fields.
+/// and `null` clears the entry fields. Files or entry fields save a new
+/// head revision (when they change it).
 #[derive(Deserialize)]
 pub struct UpdateSketch {
   title: Option<String>,
@@ -67,14 +71,10 @@ fn body_error(rejection: BytesRejection) -> AppError {
 }
 
 /// Checks a sketch's files and entry point together.
-fn validate_contents(
-  files: &[SketchFile],
-  entry_file: Option<&str>,
-  entry_name: Option<&str>,
-) -> Result<(), AppError> {
-  validate::sketch_files(files)?;
-  validate::entry_file(entry_file, files)?;
-  if let Some(name) = entry_name {
+fn validate_contents(contents: &Contents) -> Result<(), AppError> {
+  validate::sketch_files(&contents.files)?;
+  validate::entry_file(contents.entry_file.as_deref(), &contents.files)?;
+  if let Some(name) = &contents.entry_name {
     validate::entry_name(name)?;
   }
   Ok(())
@@ -146,17 +146,15 @@ pub async fn create(
   let sketch = NewSketch {
     title: validate::sketch_title(&body.title)?,
     description: validate::sketch_description(&body.description)?,
-    entry_file: body.entry_file,
-    entry_name: body.entry_name,
-    files: body.files,
+    contents: Contents {
+      files: body.files,
+      entry_file: body.entry_file,
+      entry_name: body.entry_name,
+    },
     visibility,
     forked_from: body.forked_from,
   };
-  validate_contents(
-    &sketch.files,
-    sketch.entry_file.as_deref(),
-    sketch.entry_name.as_deref(),
-  )?;
+  validate_contents(&sketch.contents)?;
   if let Some(source) = &sketch.forked_from {
     sketches::find_visible(&state.db, source, &viewer)
       .await
@@ -172,7 +170,8 @@ pub async fn create(
   ))
 }
 
-/// `GET /api/sketches/{id}`.
+/// `GET /api/sketches/{id}`: the head for the owner, the published
+/// revision for anyone else.
 pub async fn get(
   State(state): State<AppState>,
   MaybeUser(user): MaybeUser,
@@ -183,7 +182,8 @@ pub async fn get(
   Ok(Json(row.detail(&state.db, &viewer).await?))
 }
 
-/// `PUT /api/sketches/{id}` (owner only).
+/// `PUT /api/sketches/{id}` (owner only). Changing the visibility from
+/// private publishes the head; making the sketch private unpublishes it.
 pub async fn update(
   State(state): State<AppState>,
   ApiUser(user): ApiUser,
@@ -196,6 +196,21 @@ pub async fn update(
   if visibility != row.visibility {
     check_visibility(&user, visibility)?;
   }
+  let saves = body.files.is_some()
+    || body.entry_file.is_some()
+    || body.entry_name.is_some();
+  let contents = if saves {
+    let head = row.head_contents(&state.db).await?;
+    let contents = Contents {
+      files: body.files.unwrap_or(head.files),
+      entry_file: body.entry_file.unwrap_or(head.entry_file),
+      entry_name: body.entry_name.unwrap_or(head.entry_name),
+    };
+    validate_contents(&contents)?;
+    Some(contents)
+  } else {
+    None
+  };
   let update = SketchUpdate {
     title: match &body.title {
       Some(title) => validate::sketch_title(title)?,
@@ -205,20 +220,10 @@ pub async fn update(
       Some(description) => validate::sketch_description(description)?,
       None => row.description.clone(),
     },
-    entry_file: body.entry_file.unwrap_or(row.entry_file.clone()),
-    entry_name: body.entry_name.unwrap_or(row.entry_name.clone()),
-    files: body.files,
+    contents,
     visibility,
+    publish: false,
   };
-  let files = match &update.files {
-    Some(files) => files.clone(),
-    None => sketches::files(&state.db, &id).await?,
-  };
-  validate_contents(
-    &files,
-    update.entry_file.as_deref(),
-    update.entry_name.as_deref(),
-  )?;
   sketches::update(&state.db, &id, &update).await?;
   Ok(Json(reload(&state, &id, &viewer).await?))
 }
@@ -244,7 +249,9 @@ pub async fn delete(
 const MAX_TITLE_CHARS: usize = 100;
 
 /// `POST /api/sketches/{id}/fork`: a private copy owned by the caller.
-/// Files, entry point, and title default to the original's ("Fork of …").
+/// Files and entry point default to those of the revision the caller sees
+/// (the head of their own sketch, else the published one), and the title
+/// to "Fork of …".
 pub async fn fork(
   State(state): State<AppState>,
   ApiUser(user): ApiUser,
@@ -269,28 +276,91 @@ pub async fn fork(
   };
   let files = match body.files {
     Some(files) => files,
-    None => sketches::files(&state.db, &id).await?,
+    None => {
+      let mut conn = state.db.acquire().await?;
+      revisions::files(&mut conn, &id, source.shown_revision(&viewer)).await?
+    }
   };
+  let (entry_file, entry_name) = source.shown_entry(&viewer);
   let sketch = NewSketch {
     title,
     description: String::new(),
-    entry_file: body.entry_file.unwrap_or(source.entry_file.clone()),
-    entry_name: body.entry_name.unwrap_or(source.entry_name.clone()),
-    files,
+    contents: Contents {
+      files,
+      entry_file: body.entry_file.unwrap_or(entry_file),
+      entry_name: body.entry_name.unwrap_or(entry_name),
+    },
     visibility: Visibility::Private,
     forked_from: Some(source.id.clone()),
   };
-  validate_contents(
-    &sketch.files,
-    sketch.entry_file.as_deref(),
-    sketch.entry_name.as_deref(),
-  )?;
+  validate_contents(&sketch.contents)?;
   check_create_limit(&state, &user)?;
   let new_id = sketches::create(&state.db, user.id, &sketch).await?;
   Ok((
     StatusCode::CREATED,
     Json(reload(&state, &new_id, &viewer).await?),
   ))
+}
+
+/// `POST /api/sketches/{id}/publish` (owner only): the head becomes the
+/// published revision. A private sketch can't be published.
+pub async fn publish(
+  State(state): State<AppState>,
+  ApiUser(user): ApiUser,
+  Path(id): Path<String>,
+) -> ApiResult<Json<Sketch>> {
+  let viewer = Viewer::of(Some(&user));
+  let row = find_owned(&state, &id, &user).await?;
+  if row.visibility == Visibility::Private {
+    return Err(AppError::bad_request(
+      "Make it unlisted or public to publish it.",
+    ));
+  }
+  sketches::publish(&state.db, &id).await?;
+  Ok(Json(reload(&state, &id, &viewer).await?))
+}
+
+/// `POST /api/sketches/{id}/discard-draft` (owner only): the head goes back
+/// to the published revision. The draft's revisions stay in the history.
+pub async fn discard_draft(
+  State(state): State<AppState>,
+  ApiUser(user): ApiUser,
+  Path(id): Path<String>,
+) -> ApiResult<Json<Sketch>> {
+  let viewer = Viewer::of(Some(&user));
+  let row = find_owned(&state, &id, &user).await?;
+  if !row.has_draft() {
+    return Err(AppError::bad_request("There's no draft to discard."));
+  }
+  sketches::discard_draft(&state.db, &id).await?;
+  Ok(Json(reload(&state, &id, &viewer).await?))
+}
+
+/// `GET /api/sketches/{id}/published`: the published revision, for anyone
+/// who can see the sketch; 404 when it has none.
+pub async fn published(
+  State(state): State<AppState>,
+  MaybeUser(user): MaybeUser,
+  Path(id): Path<String>,
+) -> ApiResult<Json<Published>> {
+  let viewer = Viewer::of(user.as_ref());
+  let row = sketches::find_visible(&state.db, &id, &viewer).await?;
+  let published = row.published(&state.db).await?;
+  Ok(Json(published.ok_or(AppError::NotFound)?))
+}
+
+/// `GET /api/sketches/{id}/revisions` (owner only): `{revisions: [{number,
+/// created_at, published, head}]}`, newest first.
+pub async fn revisions(
+  State(state): State<AppState>,
+  ApiUser(user): ApiUser,
+  Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+  let row = find_owned(&state, &id, &user).await?;
+  let revisions =
+    revisions::list(&state.db, &id, row.head_revision, row.published_revision)
+      .await?;
+  Ok(Json(json!({ "revisions": revisions })))
 }
 
 /// `PUT /api/sketches/{id}/thumbnail` (owner only): the raw image as the

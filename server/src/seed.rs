@@ -21,6 +21,7 @@ use crate::comments;
 use crate::db;
 use crate::examples::{self, Example};
 use crate::playlists;
+use crate::revisions::Contents;
 use crate::sketches::{self, NewSketch};
 use crate::users;
 use crate::validate::SketchFile;
@@ -162,9 +163,11 @@ fn public_sketch(
   NewSketch {
     title: title.chars().take(100).collect(),
     description: description.into(),
-    entry_file: files.first().map(|f| f.path.clone()),
-    files,
-    entry_name: None,
+    contents: Contents {
+      entry_file: files.first().map(|f| f.path.clone()),
+      files,
+      entry_name: None,
+    },
     visibility: Visibility::Public,
     forked_from: forked_from.map(str::to_string),
   }

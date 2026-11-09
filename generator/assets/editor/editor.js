@@ -18,14 +18,16 @@
 // - Each run happens in a fresh iframe (run.js); a program only runs once
 //   the check of the file holding its entry point is clean.
 // - Edits are kept in this browser as drafts until they're saved to the
-//   server.
+//   server. While a sketch is unlisted or public, what its owner saves is a
+//   draft too, until they publish it; they can look at the published
+//   version (read-only) beside it, and discard the draft.
 
 import { registerEasl, currentTheme, indentAfter } from "./easl-language.js?v=__VERSION__";
 import { $, IS_MAC, el, pathProblem, promptText, storage, toast } from "./util.js?v=__VERSION__";
 import { api } from "./api.js?v=__VERSION__";
 import { Analysis, quietly } from "./analysis.js?v=__VERSION__";
 import { Checker, rangeMaker, registerFeatures } from "./features.js?v=__VERSION__";
-import { forgetDraft, newDoc, sketchDoc } from "./documents.js?v=__VERSION__";
+import { forgetDraft, newDoc, publishedDoc, sketchDoc } from "./documents.js?v=__VERSION__";
 import { FileExplorer, FileTabs, explorerOpen } from "./files.js?v=__VERSION__";
 import { Runner, renderEntries, supportsWebGPU } from "./run.js?v=__VERSION__";
 import { Social } from "./social.js?v=__VERSION__";
@@ -561,13 +563,23 @@ editor.addCommand(
 // The files open in tabs, in order.
 let openFiles = [];
 
+/** `action`, unless the open document is read-only (where it says how to
+ * get back to editing instead). */
+const editing = (action) => (...args) => {
+  if (doc.readOnly) {
+    toast("This is the published version, which is read-only. Go back to your draft to edit.", "error");
+    return;
+  }
+  return action(...args);
+};
+
 const explorer = new FileExplorer($("explorer"), {
   open: (path) => showFile(path),
-  newFile: (folder) => addFile(folder),
-  newFolder: (folder) => addFolder(folder),
-  rename: (path, isFolder) => (isFolder ? renameFolder(path) : renameFile(path)),
-  remove: (path, isFolder) => (isFolder ? removeFolder(path) : removeFile(path)),
-  move: (path, isFolder, target) => moveInTree(path, isFolder, target),
+  newFile: editing((folder) => addFile(folder)),
+  newFolder: editing((folder) => addFolder(folder)),
+  rename: editing((path, isFolder) => (isFolder ? renameFolder(path) : renameFile(path))),
+  remove: editing((path, isFolder) => (isFolder ? removeFolder(path) : removeFile(path))),
+  move: editing((path, isFolder, target) => moveInTree(path, isFolder, target)),
   refresh: () => renderFiles(),
 });
 
@@ -626,7 +638,7 @@ function showFile(path) {
   activePath = path;
   if (!openFiles.includes(path)) openFiles.push(path);
   editor.setModel(modelFor(doc, path));
-  editor.updateOptions({ readOnly: false });
+  editor.updateOptions({ readOnly: doc.readOnly });
   $("editor-empty").hidden = true;
   showEntries();
   setStatus("analyzing", "Checking…");
@@ -865,6 +877,10 @@ function removeFolder(folder) {
 
 // ---- the bar ----
 
+/** Whether the open document is its owner's sketch while it's unlisted or
+ * public, so what they save is a draft until they publish it. */
+const drafting = () => doc.canSave && doc.sketch.visibility !== "private";
+
 /** The bar's buttons for the open document. */
 function updateBar() {
   const owned = doc.canSave;
@@ -872,11 +888,18 @@ function updateBar() {
   const save = $("save");
   save.hidden = !(owned || doc.kind === "new");
   save.disabled = owned && !dirty;
-  save.textContent = owned && !dirty ? "Saved" : "Save";
+  save.textContent = owned && !dirty ? "Saved" : drafting() ? "Save draft" : "Save";
   $("fork").hidden = !(doc.kind === "sketch" && !owned);
   $("reset").hidden = !(doc.kind === "sketch" && dirty);
   $("share").hidden = doc.kind !== "sketch";
+  // The draft's state: shown while the owner's saved or unsaved work isn't
+  // what the sketch's page shows.
+  const hasDraft = drafting() && (doc.sketch.has_draft || dirty);
+  $("draft-state").hidden = !hasDraft;
+  $("view-published").hidden = !(drafting() && doc.sketch.has_draft && doc.sketch.published_revision !== null);
+  $("format").disabled = doc.readOnly;
   document.body.dataset.dirty = String(dirty);
+  document.body.classList.toggle("read-only", doc.readOnly);
 }
 
 // ---- opening documents ----
@@ -884,6 +907,7 @@ function updateBar() {
 function openDoc(next, { run: shouldRun = false } = {}) {
   runner.stop();
   doc = next;
+  editor.updateOptions({ readOnly: doc.readOnly });
   revision++;
   entriesByPath = new Map();
   filesWithProblems.clear();
@@ -1034,7 +1058,9 @@ formatOnSave.addEventListener("change", () =>
  * a sketch its owner is editing (and a new one), and runs the program.
  */
 async function saveShortcut() {
-  if (formatOnSave.checked) await editor.getAction("editor.action.formatDocument").run();
+  if (formatOnSave.checked && !doc.readOnly) {
+    await editor.getAction("editor.action.formatDocument").run();
+  }
   if (doc.canSave || doc.kind === "new") await save({ quiet: true });
   run();
 }
@@ -1059,10 +1085,86 @@ async function save({ quiet = false } = {}) {
       social.show(doc);
       updateBar();
     }
-    if (!quiet) toast("Saved");
-    refreshThumbnail(sketch.id);
+    if (sketch.visibility === "private") {
+      if (!quiet) toast("Saved");
+      // The thumbnail shows what the sketch's page shows, which for a
+      // private sketch is what was just saved (otherwise, what's published).
+      refreshThumbnail(sketch.id);
+    } else if (!quiet || !draftHintShown) {
+      draftHintShown = true;
+      toast("Draft saved. Publish it to update what everyone sees.");
+    }
+    return true;
   } catch (error) {
     updateBar();
+    toast(error.message, "error");
+    return false;
+  }
+}
+
+let draftHintShown = false;
+
+/** Makes the owner's draft (saving their unsaved edits first) the version
+ * everyone sees. */
+async function publish() {
+  if (!drafting()) return;
+  if (doc.isDirty() && !(await save({ quiet: true }))) return;
+  const publishing = doc;
+  $("publish").disabled = true;
+  try {
+    const sketch = await api.publish(publishing.id);
+    publishing.markSaved(sketch);
+    if (publishing === doc) {
+      social.show(doc);
+      updateBar();
+    }
+    toast("Published: everyone sees this version now");
+    refreshThumbnail(sketch.id, 500);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    $("publish").disabled = false;
+  }
+}
+
+/** Shows the owner the published version of their sketch, read-only, with
+ * the way back to their draft (or to discard it). */
+async function viewPublished() {
+  if (!drafting()) return;
+  flushPersist();
+  const sketch = doc.sketch;
+  try {
+    const published = await api.publishedVersion(sketch.id);
+    openDoc(publishedDoc(sketch, published), { run: true });
+    showNotice("You're looking at the published version, which is read-only.", [
+      ["Back to your draft", () => backToDraft()],
+      ["Discard draft", () => discardDraft()],
+    ]);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function backToDraft() {
+  try {
+    const { doc: draft, staleDraft } = sketchDoc(await api.getSketch(doc.id));
+    openDoc(draft, { run: true });
+    if (staleDraft) offerStaleDraft(staleDraft);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+/** Throws away the owner's draft (saved and unsaved), going back to the
+ * published version. */
+async function discardDraft() {
+  if (!confirm("Discard your draft? The sketch goes back to its published version; your unsaved edits go too.")) return;
+  try {
+    const sketch = await api.discardDraft(doc.id);
+    storage.remove(`draft:sketch:${sketch.id}`);
+    openDoc(sketchDoc(sketch).doc, { run: true });
+    toast("Draft discarded");
+  } catch (error) {
     toast(error.message, "error");
   }
 }
@@ -1198,6 +1300,8 @@ $("save").addEventListener("click", () => save());
 $("fork").addEventListener("click", () => fork());
 $("reset").addEventListener("click", () => revert());
 $("share").addEventListener("click", () => shareLink());
+$("publish").addEventListener("click", () => publish());
+$("view-published").addEventListener("click", () => viewPublished());
 
 // Ctrl/Cmd+Enter runs and Ctrl/Cmd+S saves from anywhere on the page, not
 // just the editor.
@@ -1218,6 +1322,7 @@ const social = new Social(user, {
   renameDoc: () => renameDoc(),
   deleteDoc: () => deleteDoc(),
   signIn,
+  changed: () => updateBar(),
   updateThumbnail: async () => {
     const ok = await refreshThumbnail(doc.id, 0);
     toast(ok ? "Thumbnail updated" : "Run the sketch first, then try again.", ok ? "info" : "error");

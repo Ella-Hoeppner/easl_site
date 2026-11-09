@@ -49,6 +49,13 @@ pub fn router() -> Router<AppState> {
         .delete(sketches::delete),
     )
     .route("/api/sketches/{id}/fork", post(sketches::fork))
+    .route("/api/sketches/{id}/publish", post(sketches::publish))
+    .route(
+      "/api/sketches/{id}/discard-draft",
+      post(sketches::discard_draft),
+    )
+    .route("/api/sketches/{id}/published", get(sketches::published))
+    .route("/api/sketches/{id}/revisions", get(sketches::revisions))
     .route("/api/sketches/{id}/thumbnail", put(sketches::put_thumbnail))
     .route(
       "/api/sketches/{id}/like",

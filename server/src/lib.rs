@@ -18,6 +18,7 @@ pub mod pages;
 pub mod playlists;
 pub mod ratelimit;
 pub mod reports;
+pub mod revisions;
 pub mod security;
 pub mod seed;
 pub mod site;

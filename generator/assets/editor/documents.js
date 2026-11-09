@@ -1,9 +1,13 @@
 // What the editor edits: a sketch, made of one or more easl files (in
-// folders, if it likes), of one of two kinds:
+// folders, if it likes), of one of three kinds:
 //
-// - "sketch": a sketch on the server. Its owner's edits are kept as a
-//   draft in this browser until they're saved; anyone else can edit it
-//   here too (kept as a draft) and fork it to save a copy.
+// - "sketch": a sketch on the server. Its owner works on its latest saved
+//   version (which, while the sketch is unlisted or public, is a draft until
+//   it's published), and their unsaved edits are kept as a draft in this
+//   browser until they're saved; anyone else sees its published version,
+//   can edit it here too (kept as a draft), and can fork it to save a copy.
+// - "published": an owner's read-only view of their sketch's published
+//   version, while they have a draft.
 // - "new": a sketch that hasn't been saved yet, kept as a draft. One opened
 //   from a link carrying its program (`/new#code=…`, as the docs link to
 //   programs) has a draft of its own, so it doesn't replace the visitor's.
@@ -56,13 +60,13 @@ export class Doc {
 
   /** A key naming the document in this browser. */
   get key() {
-    if (this.kind === "sketch") return `sketch:${this.id}`;
+    if (this.kind === "sketch" || this.kind === "published") return `${this.kind}:${this.id}`;
     return this.id ? `new:${this.id}` : "new";
   }
 
   /** The address that opens the document. */
   get url() {
-    if (this.kind === "sketch") return `/s/${this.id}`;
+    if (this.kind === "sketch" || this.kind === "published") return `/s/${this.id}`;
     return this.code ? `/new#code=${this.code}` : "/new";
   }
 
@@ -87,9 +91,14 @@ export class Doc {
     );
   }
 
+  get readOnly() {
+    return this.kind === "published";
+  }
+
   /** Keeps the document's current state in this browser: a draft while it
    * has unsaved changes (or empty folders), none otherwise. */
   persist() {
+    if (this.readOnly) return;
     const draftKey = `draft:${this.key}`;
     if (!this.isDirty() && this.folders.length === 0) {
       storage.remove(draftKey);
@@ -163,6 +172,22 @@ export function newDoc(starter, code = null) {
   const draft = readStored(storage.getJSON(`draft:${doc.key}`));
   if (draft) Object.assign(doc, draft);
   return doc;
+}
+
+/** The owner's read-only view of `sketch`'s published version (as the
+ * server's `published` endpoint gives it). */
+export function publishedDoc(sketch, published) {
+  const files = published.files.map(({ path, content }) => ({ path, text: content }));
+  const entry = published.entry_file ? { file: published.entry_file, name: published.entry_name } : null;
+  return new Doc({
+    kind: "published",
+    id: sketch.id,
+    title: sketch.title,
+    files,
+    entry,
+    baseline: { files, entry },
+    sketch,
+  });
 }
 
 export function forgetDraft(doc) {

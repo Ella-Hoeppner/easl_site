@@ -4,8 +4,9 @@
 //! the fixed sketch id the docs link to. [`sync`] makes each one an
 //! ordinary public sketch owned by one user (Ella's account) at that id,
 //! creating it or bringing its title, description, and files up to date.
-//! It never deletes anything and never touches likes, comments, thumbnails,
-//! or visibility.
+//! New files are saved as a new revision and published at once. It never
+//! deletes anything and never touches likes, comments, thumbnails, or
+//! visibility.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -20,6 +21,7 @@ use sqlx::SqlitePool;
 use crate::auth::Viewer;
 use crate::db::is_public_id;
 use crate::error::AppError;
+use crate::revisions::Contents;
 use crate::site;
 use crate::sketches::{self, NewSketch, SketchUpdate};
 use crate::users;
@@ -86,7 +88,9 @@ enum Change {
 
 /// Makes every example a public sketch owned by `owner` at its
 /// `sketch_id`, creating missing ones and updating ones whose title,
-/// description, or files differ (bumping `updated_at` only then).
+/// description, or files differ (bumping `updated_at` only then). An
+/// example's files become its sketch's head and, unless the sketch was made
+/// private, its published revision, replacing any draft.
 ///
 /// Everything is checked before anything is written: it fails when the
 /// owner doesn't exist, when an example is invalid (a bad sketch id, title,
@@ -155,9 +159,11 @@ async fn plan(
     return Ok(Change::Create(NewSketch {
       title,
       description,
-      files: example.files.clone(),
-      entry_file: Some(first_file),
-      entry_name: None,
+      contents: Contents {
+        files: example.files.clone(),
+        entry_file: Some(first_file),
+        entry_name: None,
+      },
       visibility: Visibility::Public,
       forked_from: None,
     }));
@@ -169,26 +175,31 @@ async fn plan(
       row.owner_username
     );
   }
-  let files = sketches::files(db, &row.id).await?;
-  let files_changed = files != example.files;
+  let head = row.head_contents(db).await?;
   // The entry file stays as it is while it's still one of the files.
-  let entry_file = match &row.entry_file {
+  let entry_file = match &head.entry_file {
     Some(path) if example.files.iter().any(|f| &f.path == path) => path.clone(),
     _ => first_file,
   };
-  let changed = files_changed
+  let contents = Contents {
+    files: example.files.clone(),
+    entry_file: Some(entry_file),
+    entry_name: head.entry_name.clone(),
+  };
+  let published = row.visibility == Visibility::Private
+    || row.published_revision == Some(row.head_revision);
+  let changed = contents != head
+    || !published
     || title != row.title
-    || description != row.description
-    || row.entry_file.as_ref() != Some(&entry_file);
+    || description != row.description;
   if !changed {
     return Ok(Change::Unchanged);
   }
   Ok(Change::Update(SketchUpdate {
     title,
     description,
-    files: files_changed.then(|| example.files.clone()),
-    entry_file: Some(entry_file),
-    entry_name: row.entry_name.clone(),
+    contents: Some(contents),
     visibility: row.visibility,
+    publish: true,
   }))
 }

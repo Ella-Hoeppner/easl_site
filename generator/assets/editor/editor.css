@@ -235,6 +235,59 @@ button.small {
   border-color: var(--border);
 }
 
+/* The owner's draft: a marker, the way to the published version, and
+   Publish. */
+.draft-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.draft-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  color: var(--warn);
+  border: 1px dashed currentColor;
+  cursor: help;
+}
+
+.link-button {
+  border: none;
+  background: none;
+  padding: 0.2rem 0.1rem;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.link-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+/* The published version, read-only: nothing to change files with. */
+body.read-only .explorer-head .icon-button,
+body.read-only .tree-actions {
+  display: none !important;
+}
+
+body.read-only .editor-area::after {
+  content: "Published version · read-only";
+  position: absolute;
+  right: 1.2rem;
+  bottom: 0.8rem;
+  z-index: 5;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
 .social-actions {
   display: flex;
   align-items: center;
