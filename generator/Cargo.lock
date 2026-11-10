@@ -180,7 +180,8 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "fsexp"
 version = "0.1.0"
-source = "git+https://github.com/Ella-Hoeppner/fsexp.git#ceb5705fa9917174e0104802d824fbcb32163741"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9d9b84b7d803b6890cc279bbb99d0105df220919c835f970367f22cff085d53"
 dependencies = [
  "take_mut",
 ]
