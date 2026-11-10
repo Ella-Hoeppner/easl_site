@@ -169,7 +169,9 @@ async fn header_shows_who_is_signed_in() {
   let signed_in = alice.get("/").await.page();
   assert!(signed_in.contains("/u/alice/avatar.svg"));
   assert!(signed_in.contains("action=\"/logout\""));
-  assert!(signed_in.contains("href=\"/playlists/new\""));
+  // New playlists start from the profile's Playlists tab, not the menu.
+  assert!(signed_in.contains("href=\"/u/alice?tab=playlists\""));
+  assert!(!signed_in.contains("href=\"/playlists/new\""));
   assert!(!signed_in.contains("Sign up"));
 }
 
