@@ -29,22 +29,23 @@
       <div id="playlist-popover" class="popover" hidden></div>
     </div>
   </div>
-  <div id="draft-state" class="draft-state" hidden>
-    <span class="draft-pill" title="Your saved changes aren't public yet: the sketch's page shows its published version until you publish them">Draft</span>
-    <button id="view-published" class="link-button" title="See the published version (read-only)">View published</button>
-    <button id="publish" class="primary" title="Make your draft the version everyone sees">Publish</button>
+  <div id="draft-state" class="split-button popover-anchor" hidden>
+    <button id="publish" class="primary" title="Your saved changes aren't public yet: publish them to make them the version everyone sees">Publish</button>
+    <button id="publish-more" class="primary split-toggle" title="More publishing options" aria-label="More publishing options" aria-haspopup="menu" aria-expanded="false"><span class="caret" aria-hidden="true"></span></button>
+    <div id="publish-menu" class="popover menu publish-menu" role="menu" hidden>
+      <button id="view-published" role="menuitem" title="See the published version (read-only)">View published version</button>
+    </div>
   </div>
   <div class="actions">
-    <button id="format" title="Format the file (Shift+Alt+F)">Format</button>
+    <div class="format-group">
+      <button id="format" title="Format the file (Shift+Alt+F)">Format</button>
+      <button id="format-on-save" class="format-switch" role="switch" aria-checked="true" aria-label="Format on save"><span class="format-switch-knob" aria-hidden="true"></span></button>
+    </div>
     <button id="save" title="Save (Ctrl/⌘+S)" hidden>Save</button>
     <button id="fork" class="primary" title="Save a copy of this sketch as one of yours" hidden>Fork</button>
     <button id="reset" title="Discard the changes you haven't saved" hidden>Revert</button>
     <button id="share" title="Copy a link to this sketch" hidden>Share</button>
   </div>
-  <label class="toggle" title="Format the file each time you save (Ctrl/⌘+S)">
-    <input type="checkbox" id="format-on-save" checked>
-    Format on save
-  </label>
   <button id="status" class="status" data-kind="analyzing" title="Click to go to the next problem">Checking…</button>
   <nav class="links">
     <a href="/">Explore</a>

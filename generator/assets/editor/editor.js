@@ -896,7 +896,12 @@ function updateBar() {
   // what the sketch's page shows.
   const hasDraft = drafting() && (doc.sketch.has_draft || dirty);
   $("draft-state").hidden = !hasDraft;
-  $("view-published").hidden = !(drafting() && doc.sketch.has_draft && doc.sketch.published_revision !== null);
+  const canViewPublished = drafting() && doc.sketch.has_draft && doc.sketch.published_revision !== null;
+  $("view-published").disabled = !canViewPublished;
+  $("view-published").title = canViewPublished
+    ? "See the published version (read-only)"
+    : "What you've saved is the published version: your changes aren't saved yet";
+  if (!hasDraft) closePublishMenu();
   $("format").disabled = doc.readOnly;
   document.body.dataset.dirty = String(dirty);
   document.body.classList.toggle("read-only", doc.readOnly);
@@ -1088,11 +1093,24 @@ $("format").addEventListener("click", () => {
 
 // ---- saving, forking, and the rest of a document's life ----
 
-const formatOnSave = $("format-on-save");
-formatOnSave.checked = storage.get("format-on-save") !== "false";
-formatOnSave.addEventListener("change", () =>
-  storage.set("format-on-save", String(formatOnSave.checked)),
-);
+// Format on save: the switch beside Format (up is on), remembered in this
+// browser.
+const formatOnSave = {
+  on: storage.get("format-on-save") !== "false",
+  show() {
+    const button = $("format-on-save");
+    button.setAttribute("aria-checked", String(this.on));
+    button.title = this.on
+      ? "Format on save is on: Ctrl/⌘+S formats the file. Click to turn it off."
+      : "Format on save is off. Click to format the file each time you save (Ctrl/⌘+S).";
+  },
+};
+formatOnSave.show();
+$("format-on-save").addEventListener("click", () => {
+  formatOnSave.on = !formatOnSave.on;
+  storage.set("format-on-save", String(formatOnSave.on));
+  formatOnSave.show();
+});
 
 /**
  * Ctrl/Cmd+S: formats the file when Format on save is on (the format
@@ -1101,7 +1119,7 @@ formatOnSave.addEventListener("change", () =>
  * a sketch its owner is editing (and a new one), and runs the program.
  */
 async function saveShortcut() {
-  if (formatOnSave.checked && !doc.readOnly) {
+  if (formatOnSave.on && !doc.readOnly) {
     await editor.getAction("editor.action.formatDocument").run();
   }
   if (doc.canSave || doc.kind === "new") await save({ quiet: true });
@@ -1168,6 +1186,17 @@ async function publish() {
   } finally {
     $("publish").disabled = false;
   }
+}
+
+// The menu beside Publish.
+function openPublishMenu() {
+  $("publish-menu").hidden = false;
+  $("publish-more").setAttribute("aria-expanded", "true");
+}
+
+function closePublishMenu() {
+  $("publish-menu").hidden = true;
+  $("publish-more").setAttribute("aria-expanded", "false");
 }
 
 /** Shows the owner the published version of their sketch, read-only, with
@@ -1344,7 +1373,23 @@ $("fork").addEventListener("click", () => fork());
 $("reset").addEventListener("click", () => revert());
 $("share").addEventListener("click", () => shareLink());
 $("publish").addEventListener("click", () => publish());
-$("view-published").addEventListener("click", () => viewPublished());
+$("view-published").addEventListener("click", () => {
+  closePublishMenu();
+  viewPublished();
+});
+$("publish-more").addEventListener("click", () => {
+  if ($("publish-menu").hidden) openPublishMenu();
+  else closePublishMenu();
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!$("draft-state").contains(event.target)) closePublishMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("publish-menu").hidden) {
+    closePublishMenu();
+    $("publish-more").focus();
+  }
+});
 
 // Ctrl/Cmd+Enter runs and Ctrl/Cmd+S saves from anywhere on the page, not
 // just the editor.
