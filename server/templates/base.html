@@ -27,7 +27,6 @@
       <div class="menu-panel">
         <a href="{{ app_base }}/u/{{ me.username }}">Profile</a>
         <a href="{{ app_base }}/u/{{ me.username }}?tab=playlists">Playlists</a>
-        <a href="{{ app_base }}/playlists/new">New playlist</a>
         <a href="{{ app_base }}/settings">Settings</a>
         {% if me.is_admin %}<a href="{{ app_base }}/admin">Moderation</a>{% endif %}
         <form method="post" action="{{ app_base }}/logout"><button type="submit">Sign out</button></form>
