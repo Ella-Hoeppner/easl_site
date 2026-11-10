@@ -535,6 +535,66 @@ input[type="checkbox"] {
   font-weight: 600;
 }
 
+/* ---- tags ---- */
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: -0.4rem 0 1.4rem;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tag-chip:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  text-decoration: none;
+}
+
+.tag-chip[aria-current="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tag-count {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.tag-filter {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin-bottom: 1.2rem;
+}
+
+.tag-filter h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.tag-name {
+  color: var(--accent);
+}
+
+.tag-filter a {
+  font-size: 0.9rem;
+}
+
 /* ---- sketch cards ---- */
 
 .grid {
@@ -614,6 +674,26 @@ input[type="checkbox"] {
 }
 
 .likes.liked {
+  color: var(--accent);
+}
+
+.card-tags {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.card-tags a {
+  color: var(--text-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-tags a:hover {
   color: var(--accent);
 }
 

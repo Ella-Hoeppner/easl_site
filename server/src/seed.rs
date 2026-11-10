@@ -3,13 +3,13 @@
 //! Creates the users `ella` (an admin, who owns the examples), `alice`,
 //! `bob`, and `carol`, all with the password `password123` and verified
 //! emails; syncs the site's examples (`editor/examples.json`, or two
-//! built-in programs without one) to `ella`; and gives the others sketches
-//! of their own (forks of the examples and short programs), likes,
-//! comments, and public playlists.
+//! built-in programs without one) to `ella`, tagging the ones without
+//! tags; and gives the others sketches of their own (forks of the examples
+//! and short programs, tagged), likes, comments, and public playlists.
 //!
-//! Users that already exist are left alone, the sync is idempotent, and the
-//! social data is only made while `alice` has no public sketches, so
-//! seeding again changes nothing.
+//! Users that already exist are left alone, the sync is idempotent, tags
+//! are only given to examples without any, and the social data is only made
+//! while `alice` has no public sketches, so seeding again changes nothing.
 
 use std::path::Path;
 
@@ -23,6 +23,7 @@ use crate::examples::{self, Example};
 use crate::playlists;
 use crate::revisions::Contents;
 use crate::sketches::{self, NewSketch};
+use crate::tags;
 use crate::users;
 use crate::validate::SketchFile;
 use crate::visibility::Visibility;
@@ -153,12 +154,52 @@ async fn ensure_user(
   Ok(user.id)
 }
 
+/// The tags of an example, by its id (its old playground name).
+fn example_tags(id: &str) -> &'static [&'static str] {
+  match id {
+    "landing" => &["generative", "2d", "animation"],
+    "game-of-life" => &["simulation", "compute", "cellular-automata"],
+    "wavetable" => &["audio", "synth"],
+    "raymarch-sphere" => &["raymarching", "walkthrough", "3d", "sdf"],
+    "raymarch-cpu-raymarch" => &["raymarching", "walkthrough", "3d", "cpu"],
+    "raymarch-rotating-union" => {
+      &["raymarching", "walkthrough", "3d", "sdf", "animation"]
+    }
+    "raymarch-materials" => &["raymarching", "walkthrough", "3d", "lighting"],
+    "gradient" => &["2d", "color", "beginner"],
+    "pulse" => &["2d", "color", "animation"],
+    _ => &[],
+  }
+}
+
+fn strings(tags: &[&str]) -> Vec<String> {
+  tags.iter().map(|tag| tag.to_string()).collect()
+}
+
+/// Tags the examples that have no tags yet.
+async fn tag_examples(
+  db: &SqlitePool,
+  examples: &[Example],
+) -> anyhow::Result<()> {
+  let mut conn = db.acquire().await?;
+  for example in examples {
+    let tags = example_tags(&example.id);
+    if !tags.is_empty()
+      && tags::of(&mut conn, &example.sketch_id).await?.is_empty()
+    {
+      tags::set(&mut conn, &example.sketch_id, &strings(tags)).await?;
+    }
+  }
+  Ok(())
+}
+
 /// A public sketch with one file.
 fn public_sketch(
   title: &str,
   description: &str,
   files: Vec<SketchFile>,
   forked_from: Option<&str>,
+  tags: &[&str],
 ) -> NewSketch {
   NewSketch {
     title: title.chars().take(100).collect(),
@@ -170,6 +211,7 @@ fn public_sketch(
     },
     visibility: Visibility::Public,
     forked_from: forked_from.map(str::to_string),
+    tags: strings(tags),
   }
 }
 
@@ -183,17 +225,28 @@ async fn create_sketch(
     .map_err(|e| e.into_anyhow().context("creating a sketch"))
 }
 
-/// Gives each non-owner demo user a fork of an example and a program of
-/// their own, returning the new sketches' ids.
+/// Gives each non-owner demo user a fork of an example (with its tags, as
+/// forks have) and a program of their own, returning the new sketches'
+/// ids.
 async fn others_sketches(
   db: &SqlitePool,
   others: &[i64],
   examples: &[Example],
 ) -> anyhow::Result<Vec<String>> {
-  let originals = [
-    ("Screen-space gradient", "My first easl sketch.", GRADIENT),
-    ("Pulse", "Sines all the way down.", PULSE),
-    ("Slow gradient", "", GRADIENT),
+  let originals: [(&str, &str, &str, &[&str]); 3] = [
+    (
+      "Screen-space gradient",
+      "My first easl sketch.",
+      GRADIENT,
+      &["2d", "gradient", "beginner"],
+    ),
+    (
+      "Pulse",
+      "Sines all the way down.",
+      PULSE,
+      &["2d", "animation", "trigonometry"],
+    ),
+    ("Slow gradient", "", GRADIENT, &["gradient", "minimal"]),
   ];
   let mut ids = Vec::new();
   for (i, owner) in others.iter().enumerate() {
@@ -203,10 +256,12 @@ async fn others_sketches(
       "Forked from the example; next I'll change the colors.",
       example.files.clone(),
       Some(&example.sketch_id),
+      example_tags(&example.id),
     );
     ids.push(create_sketch(db, *owner, &fork).await?);
-    let (title, description, source) = originals[i % originals.len()];
-    let original = public_sketch(title, description, main_file(source), None);
+    let (title, description, source, tags) = originals[i % originals.len()];
+    let original =
+      public_sketch(title, description, main_file(source), None, tags);
     ids.push(create_sketch(db, *owner, &original).await?);
   }
   Ok(ids)
@@ -281,6 +336,7 @@ pub async fn seed(db: &SqlitePool, site_dir: &Path) -> anyhow::Result<()> {
   };
   let report = examples::sync(db, OWNER, &examples).await?;
   println!("Examples: {report}.");
+  tag_examples(db, &examples).await?;
 
   let others = &user_ids[1..];
   let (alice_sketches, _) = sketches::listed_counts(db, others[0]).await?;

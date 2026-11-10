@@ -18,6 +18,9 @@
       {% if show_visibility %}{{ visibility_badge(s.visibility, s.hidden) }}{% endif %}
       <span class="likes{% if s.liked %} liked{% endif %}" title="{{ s.like_count }} {{ 'like' if s.like_count == 1 else 'likes' }}"><span aria-hidden="true">♥</span> {{ s.like_count }}</span>
     </div>
+    {% if s.tags %}
+    <div class="card-tags">{% for tag in s.tags[:3] %}<a href="/?tag={{ tag }}">#{{ tag }}</a>{% endfor %}</div>
+    {% endif %}
   </div>
 </article>
 {%- endmacro %}

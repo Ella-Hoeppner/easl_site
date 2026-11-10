@@ -66,6 +66,12 @@ const MAX_PATH_CHARS: usize = 128;
 const MAX_FILE_BYTES: usize = 200 * 1024;
 const MAX_TOTAL_FILE_BYTES: usize = 1024 * 1024;
 
+/// The most tags a sketch can have.
+pub const MAX_TAGS: usize = 8;
+
+/// The longest a tag can be, in characters.
+const MAX_TAG_CHARS: usize = 32;
+
 fn bad(message: impl Into<String>) -> AppError {
   AppError::bad_request(message)
 }
@@ -191,6 +197,65 @@ pub fn playlist_description(raw: &str) -> Result<String, AppError> {
 
 pub fn report_reason(raw: &str) -> Result<String, AppError> {
   optional_text(raw, 1000, "Report reasons")
+}
+
+/// A tag as typed, put in its stored form: trimmed, lowercased, without a
+/// leading `#`, with each run of whitespace, underscores, and `-` turned
+/// into one `-`. The result isn't necessarily a valid tag ([`tag`] checks).
+pub fn normalize_tag(raw: &str) -> String {
+  let text = raw.trim();
+  let text = text.strip_prefix('#').unwrap_or(text).trim_start();
+  let mut tag = String::with_capacity(text.len());
+  let mut in_gap = false;
+  for c in text.chars() {
+    if c.is_whitespace() || c == '_' || c == '-' {
+      if !in_gap {
+        tag.push('-');
+      }
+      in_gap = true;
+    } else {
+      tag.extend(c.to_lowercase());
+      in_gap = false;
+    }
+  }
+  tag
+}
+
+/// A tag, normalized ([`normalize_tag`]): 1–32 characters of lowercase
+/// ASCII letters, digits, and `-`, not starting or ending with `-`.
+pub fn tag(raw: &str) -> Result<String, AppError> {
+  let tag = normalize_tag(raw);
+  let valid = (1..=MAX_TAG_CHARS).contains(&tag.chars().count())
+    && tag
+      .bytes()
+      .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    && !tag.starts_with('-')
+    && !tag.ends_with('-');
+  if valid {
+    Ok(tag)
+  } else {
+    Err(bad(format!(
+      "Invalid tag {raw:?}: tags are 1 to {MAX_TAG_CHARS} lowercase \
+       letters, digits, and '-', not starting or ending with '-'."
+    )))
+  }
+}
+
+/// A sketch's tags: each valid ([`tag`]), at most 8, distinct after
+/// normalization, in the order given.
+pub fn tags(raw: &[String]) -> Result<Vec<String>, AppError> {
+  let mut tags = Vec::with_capacity(raw.len());
+  for text in raw {
+    let tag = tag(text)?;
+    if tags.contains(&tag) {
+      return Err(bad(format!("The tag {tag:?} appears twice.")));
+    }
+    tags.push(tag);
+  }
+  if tags.len() > MAX_TAGS {
+    return Err(bad(format!("A sketch can have at most {MAX_TAGS} tags.")));
+  }
+  Ok(tags)
 }
 
 /// One file of a sketch, as sent by clients and stored.
@@ -416,6 +481,53 @@ mod tests {
     assert_eq!(next_path(Some("https://evil.com")), "/");
     assert_eq!(next_path(Some("/\\evil.com")), "/");
     assert_eq!(next_path(None), "/");
+  }
+
+  #[test]
+  fn tag_normalization() {
+    assert_eq!(normalize_tag("  #Ray Marching "), "ray-marching");
+    assert_eq!(normalize_tag("game_of  life"), "game-of-life");
+    assert_eq!(normalize_tag("# 3D"), "3d");
+    assert_eq!(normalize_tag("a _ b"), "a-b");
+    assert_eq!(normalize_tag("a - b--c"), "a-b-c");
+    assert_eq!(tag("#SDF").ok().as_deref(), Some("sdf"));
+    assert_eq!(tag("2d-noise").ok().as_deref(), Some("2d-noise"));
+  }
+
+  #[test]
+  fn tag_rules() {
+    assert!(tag("").is_err());
+    assert!(tag("#").is_err());
+    assert!(tag("   ").is_err());
+    assert!(tag("-edge").is_err());
+    assert!(tag("edge-").is_err());
+    assert!(tag("_edge").is_err());
+    assert!(tag("c++").is_err());
+    assert!(tag("émile").is_err());
+    assert!(tag("a.b").is_err());
+    assert!(tag(&"a".repeat(32)).is_ok());
+    assert!(tag(&"a".repeat(33)).is_err());
+    let message = tag("c++").expect_err("bad").message();
+    assert!(message.contains("\"c++\""), "{message}");
+    assert!(message.contains("lowercase letters"), "{message}");
+  }
+
+  #[test]
+  fn tag_sets() {
+    let strings = |tags: &[&str]| -> Vec<String> {
+      tags.iter().map(|t| t.to_string()).collect()
+    };
+    assert_eq!(
+      tags(&strings(&["Zeta", "#alpha", "mid dle"])).ok(),
+      Some(strings(&["zeta", "alpha", "mid-dle"]))
+    );
+    assert!(tags(&[]).is_ok_and(|t| t.is_empty()));
+    assert!(tags(&strings(&["Noise", "#noise"])).is_err());
+    let eight: Vec<_> = (0..8).map(|i| format!("t{i}")).collect();
+    assert!(tags(&eight).is_ok());
+    let nine: Vec<_> = (0..9).map(|i| format!("t{i}")).collect();
+    assert!(tags(&nine).is_err());
+    assert!(tags(&strings(&["fine", "not fine!"])).is_err());
   }
 
   #[test]

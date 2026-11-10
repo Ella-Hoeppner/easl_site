@@ -33,11 +33,13 @@ pub struct CreateSketch {
   entry_name: Option<String>,
   visibility: Option<Visibility>,
   forked_from: Option<String>,
+  #[serde(default)]
+  tags: Vec<String>,
 }
 
 /// The body of `PUT /api/sketches/{id}`; absent fields stay as they are,
 /// and `null` clears the entry fields. Files or entry fields save a new
-/// head revision (when they change it).
+/// head revision (when they change it); `tags` replaces the tags.
 #[derive(Deserialize)]
 pub struct UpdateSketch {
   title: Option<String>,
@@ -48,6 +50,7 @@ pub struct UpdateSketch {
   #[serde(default, deserialize_with = "nullable")]
   entry_name: Option<Option<String>>,
   visibility: Option<Visibility>,
+  tags: Option<Vec<String>>,
 }
 
 /// The body of `POST /api/sketches/{id}/fork`, which may be empty.
@@ -153,6 +156,7 @@ pub async fn create(
     },
     visibility,
     forked_from: body.forked_from,
+    tags: validate::tags(&body.tags)?,
   };
   validate_contents(&sketch.contents)?;
   if let Some(source) = &sketch.forked_from {
@@ -184,6 +188,7 @@ pub async fn get(
 
 /// `PUT /api/sketches/{id}` (owner only). Changing the visibility from
 /// private publishes the head; making the sketch private unpublishes it.
+/// Tags apply at once, like the title and description.
 pub async fn update(
   State(state): State<AppState>,
   ApiUser(user): ApiUser,
@@ -223,6 +228,7 @@ pub async fn update(
     contents,
     visibility,
     publish: false,
+    tags: body.tags.as_deref().map(validate::tags).transpose()?,
   };
   sketches::update(&state.db, &id, &update).await?;
   Ok(Json(reload(&state, &id, &viewer).await?))
@@ -251,7 +257,7 @@ const MAX_TITLE_CHARS: usize = 100;
 /// `POST /api/sketches/{id}/fork`: a private copy owned by the caller.
 /// Files and entry point default to those of the revision the caller sees
 /// (the head of their own sketch, else the published one), and the title
-/// to "Fork of …".
+/// to "Fork of …". The fork has the original's tags.
 pub async fn fork(
   State(state): State<AppState>,
   ApiUser(user): ApiUser,
@@ -292,6 +298,7 @@ pub async fn fork(
     },
     visibility: Visibility::Private,
     forked_from: Some(source.id.clone()),
+    tags: source.tags(),
   };
   validate_contents(&sketch.contents)?;
   check_create_limit(&state, &user)?;

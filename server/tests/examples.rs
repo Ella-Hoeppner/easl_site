@@ -9,7 +9,7 @@ use common::TestApp;
 use easl_site_server::examples::{self, Example, SyncReport};
 use easl_site_server::seed;
 use easl_site_server::users;
-use easl_site_server::validate::SketchFile;
+use easl_site_server::validate::{self, SketchFile};
 
 fn example(id: &str, sketch_id: &str, title: &str, source: &str) -> Example {
   Example {
@@ -43,7 +43,7 @@ async fn updated_at(app: &TestApp, id: &str) -> i64 {
 #[tokio::test]
 async fn sync_creates_then_updates_only_what_changed() {
   let app = TestApp::new().await;
-  app.user("ella").await;
+  let mut ella = app.user("ella").await;
   let db = &app.state.db;
   let mut examples = vec![
     example("landing", "Ab3dE9xQ", "Landing page", "(defn main [])"),
@@ -88,6 +88,16 @@ async fn sync_creates_then_updates_only_what_changed() {
   assert_eq!(again, report(0, 0, 2));
   assert_eq!(updated_at(&app, "Ab3dE9xQ").await, 5, "unchanged untouched");
 
+  // Tags the owner gave survive syncs.
+  let tagged = ella
+    .api(
+      Method::PUT,
+      "/api/sketches/Ab3dE9xQ",
+      json!({"tags": ["generative", "2d"]}),
+    )
+    .await;
+  assert_eq!(tagged.status, StatusCode::OK);
+
   examples[0].title = "Landing".into();
   examples[1].files[0].content = "(defn main [] 1)".into();
   let changed = examples::sync(db, "ella", &examples).await.expect("sync");
@@ -105,6 +115,7 @@ async fn sync_creates_then_updates_only_what_changed() {
   assert_eq!(landing["title"], "Landing");
   assert_eq!(landing["like_count"], 1);
   assert_eq!(landing["comment_count"], 1);
+  assert_eq!(landing["tags"], json!(["generative", "2d"]));
 
   // Removing an example deletes nothing.
   let fewer = examples::sync(db, "ella", &examples[..1])
@@ -208,15 +219,46 @@ async fn seeding_is_repeatable() {
       .fetch_one(db)
       .await
       .expect("count");
-    (sketches, playlists)
+    let tags: Vec<String> = sqlx::query_scalar("SELECT tag FROM sketch_tags")
+      .fetch_all(db)
+      .await
+      .expect("tags");
+    (sketches, playlists, tags.len())
   };
   let first = counts().await;
-  assert_eq!(first, (8, 2), "2 built-in examples, 6 others, 2 playlists");
+  assert_eq!(first.0, 8, "2 built-in examples, 6 others");
+  assert_eq!(first.1, 2, "2 playlists");
+  // Every sketch is tagged, with valid tags.
+  let untagged: i64 = sqlx::query_scalar(
+    "SELECT COUNT(*) FROM sketches s \
+     WHERE NOT EXISTS (SELECT 1 FROM sketch_tags t WHERE t.sketch_id = s.id)",
+  )
+  .fetch_one(db)
+  .await
+  .expect("count");
+  assert_eq!(untagged, 0);
+  let all_tags: Vec<String> = sqlx::query_scalar("SELECT tag FROM sketch_tags")
+    .fetch_all(db)
+    .await
+    .expect("tags");
+  for tag in &all_tags {
+    assert_eq!(validate::tag(tag).ok().as_ref(), Some(tag));
+  }
   seed::seed(db, &site).await.expect("seed again");
   assert_eq!(counts().await, first);
 
   let mut client = app.client();
   assert_eq!(client.get("/s/SeedGrad").await.status, StatusCode::OK);
+  let gradient = client
+    .api(Method::GET, "/api/sketches/SeedGrad", Value::Null)
+    .await
+    .json();
+  assert_eq!(gradient["tags"], json!(["2d", "color", "beginner"]));
+  // Explore shows the tags.
+  let explore = client.get("/").await.page();
+  assert!(
+    explore.contains("class=\"tag-chip\" href=\"/?sort=new&amp;tag=2d\"")
+  );
   let profile = client.get("/u/alice?tab=playlists").await.page();
   assert!(profile.contains("Favorites"));
 }

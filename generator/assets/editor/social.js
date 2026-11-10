@@ -1,7 +1,7 @@
 // The social side of the editor page: the open sketch's title, author,
 // like button, and playlists in the bar, and the "About" and "Comments"
-// tabs under the canvas (description, visibility, forking, reporting,
-// deleting, and the comment thread).
+// tabs under the canvas (description, tags, visibility, forking,
+// reporting, deleting, and the comment thread).
 
 import { $, el, fullDate, promptText, richText, timeAgo, toast } from "./util.js?v=__VERSION__";
 import { api } from "./api.js?v=__VERSION__";
@@ -168,6 +168,7 @@ export class Social {
       `${sketch.view_count} view${sketch.view_count === 1 ? "" : "s"}`, " · ",
       `${sketch.comment_count} comment${sketch.comment_count === 1 ? "" : "s"}`));
     parts.push(owner ? this.descriptionEditor(sketch) : description(sketch.description));
+    parts.push(owner ? this.tagEditor(sketch) : tagLinks(sketch.tags));
     if (owner) parts.push(this.visibilityControl(sketch));
     else if (sketch.visibility !== "public") {
       parts.push(el("p", { className: "about-note" }, `This sketch is ${sketch.visibility}.`));
@@ -219,6 +220,74 @@ export class Social {
     return el("div", { className: "description-editor" },
       el("label", { className: "field-label" }, "Description", field),
       el("div", { className: "field-row" }, save, status));
+  }
+
+  /** The owner's tags: chips with a remove button and a field adding more
+   * (Enter, comma, or space ends a tag). Every change saves at once; the
+   * server normalizes the tags, so the chips show what it kept. */
+  tagEditor(sketch) {
+    const status = el("span", { className: "field-status" });
+    const chips = el("span", { className: "tag-chips" });
+    const field = el("input", {
+      className: "tag-field",
+      maxLength: 33,
+      placeholder: "Add a tag…",
+      attrs: { "aria-label": "Add a tag" },
+    });
+    const box = el("div", { className: "tag-editor", onclick: (event) => {
+      if (event.target === box) field.focus();
+    } }, chips, field);
+
+    const render = () => {
+      chips.replaceChildren(...(sketch.tags ?? []).map((tag) =>
+        el("span", { className: "tag-chip" },
+          el("a", { href: tagHref(tag), title: `Sketches tagged #${tag}` }, `#${tag}`),
+          el("button", {
+            className: "tag-remove",
+            title: `Remove #${tag}`,
+            attrs: { "aria-label": `Remove ${tag}` },
+            onclick: () => save((tags) => tags.filter((t) => t !== tag)),
+          }, "×"))));
+      field.hidden = (sketch.tags ?? []).length >= MAX_TAGS;
+    };
+    // Saves run one at a time, each changing the tags the last one left
+    // (a blur adding a tag can race the click on a remove button).
+    let saving = Promise.resolve();
+    const save = (change) => (saving = saving.then(async () => {
+      status.textContent = "";
+      try {
+        const updated = await api.updateSketch(sketch.id, { tags: change(sketch.tags ?? []) });
+        sketch.tags = updated.tags;
+        sketch.updated_at = updated.updated_at;
+        render();
+        return true;
+      } catch (error) {
+        status.textContent = error.message;
+        return false;
+      }
+    }));
+    const commit = async (refocus) => {
+      const tag = field.value.trim().replace(/^#/, "");
+      if (!tag) return;
+      field.value = "";
+      if (!(await save((tags) => [...tags, tag]))) field.value = tag;
+      else if (refocus && !field.hidden) field.focus();
+    };
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === "," || (event.key === " " && field.value.trim())) {
+        event.preventDefault();
+        commit(true);
+      } else if (event.key === "Backspace" && !field.value && sketch.tags?.length) {
+        event.preventDefault();
+        save((tags) => tags.slice(0, -1));
+      }
+    });
+    field.addEventListener("input", () => { status.textContent = ""; });
+    field.addEventListener("blur", () => commit(false));
+    render();
+    return el("div", { className: "tags" },
+      el("span", { className: "field-label" }, "Tags"), box,
+      el("div", { className: "field-row" }, status));
   }
 
   visibilityControl(sketch) {
@@ -488,6 +557,19 @@ export class Social {
     sketch.comment_count = Math.max(0, sketch.comment_count + change);
     $("comments-count").textContent = sketch.comment_count ? String(sketch.comment_count) : "";
   }
+}
+
+/** The most tags a sketch can have (the server's limit). */
+const MAX_TAGS = 8;
+
+const tagHref = (tag) => `/?tag=${encodeURIComponent(tag)}`;
+
+/** A sketch's tags, for visitors: links to Explore filtered by each. */
+function tagLinks(tags) {
+  if (!tags?.length) return null;
+  return el("p", { className: "tag-links" },
+    ...tags.map((tag) =>
+      el("a", { className: "tag-chip", href: tagHref(tag), title: `Sketches tagged #${tag}` }, `#${tag}`)));
 }
 
 function description(text) {

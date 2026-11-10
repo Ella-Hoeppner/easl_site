@@ -6,6 +6,9 @@
 //! revision, which exists while it's unlisted or public. A sketch made
 //! unlisted or public from private publishes its head; made private, it
 //! stops having a published revision.
+//!
+//! Its tags ([`crate::tags`]) are read with it, and explore can filter by
+//! them.
 
 use anyhow::anyhow;
 use serde::Serialize;
@@ -15,8 +18,9 @@ use crate::auth::Viewer;
 use crate::db::{ID_ATTEMPTS, is_unique_violation, new_public_id, now};
 use crate::error::AppError;
 use crate::revisions::{self, Contents};
+use crate::tags;
 use crate::users::Author;
-use crate::validate::SketchFile;
+use crate::validate::{self, SketchFile};
 use crate::visibility::{
   Access, LISTED_SKETCH_SQL, VISIBLE_SKETCH_SQL, Visibility,
 };
@@ -66,6 +70,9 @@ pub struct SketchRow {
   pub fork_owner_id: Option<i64>,
   pub fork_owner_username: Option<String>,
   pub fork_owner_banned_at: Option<i64>,
+  /// The sketch's tags in order, separated by spaces (tags have none), or
+  /// null when it has none.
+  pub tag_list: Option<String>,
 }
 
 /// The start of every [`SketchRow`] query; binds the viewer's id.
@@ -82,7 +89,9 @@ const SELECT: &str = "SELECT s.id, s.owner_id, s.title, s.description, \
     AND l.user_id IS ?) AS liked, \
   f.title AS fork_title, f.visibility AS fork_visibility, \
   f.hidden_at AS fork_hidden_at, f.owner_id AS fork_owner_id, \
-  fu.username AS fork_owner_username, fu.banned_at AS fork_owner_banned_at \
+  fu.username AS fork_owner_username, fu.banned_at AS fork_owner_banned_at, \
+  (SELECT GROUP_CONCAT(st.tag, ' ' ORDER BY st.position) \
+    FROM sketch_tags st WHERE st.sketch_id = s.id) AS tag_list \
   FROM sketches s \
   JOIN users u ON u.id = s.owner_id \
   JOIN sketch_revisions hr ON hr.sketch_id = s.id \
@@ -135,6 +144,8 @@ pub struct SketchSummary {
   pub hidden: bool,
   pub thumbnail_url: String,
   pub url: String,
+  /// Its tags, in the order its owner gave them.
+  pub tags: Vec<String>,
 }
 
 /// A sketch with everything, as the API returns it.
@@ -210,6 +221,15 @@ impl SketchRow {
       .is_some_and(|published| published != self.head_revision)
   }
 
+  /// The sketch's tags in order.
+  pub fn tags(&self) -> Vec<String> {
+    self
+      .tag_list
+      .as_deref()
+      .map(|list| list.split(' ').map(str::to_string).collect())
+      .unwrap_or_default()
+  }
+
   /// Where the sketch was forked from, if the viewer can see that sketch.
   fn fork_source(&self, viewer: &Viewer) -> Option<ForkSource> {
     let access = Access {
@@ -261,6 +281,7 @@ impl SketchRow {
       hidden: self.hidden_at.is_some(),
       thumbnail_url: self.thumbnail_url(),
       url: format!("/s/{}", self.id),
+      tags: self.tags(),
     }
   }
 
@@ -344,6 +365,8 @@ pub struct NewSketch {
   pub contents: Contents,
   pub visibility: Visibility,
   pub forked_from: Option<String>,
+  /// Its tags, validated.
+  pub tags: Vec<String>,
 }
 
 /// Stores a new sketch for `owner_id`, returning its id.
@@ -397,6 +420,7 @@ pub async fn insert(
   .execute(&mut *tx)
   .await?;
   revisions::insert(&mut tx, id, 1, &sketch.contents, now).await?;
+  tags::set(&mut tx, id, &sketch.tags).await?;
   tx.commit().await
 }
 
@@ -410,6 +434,8 @@ pub struct SketchUpdate {
   pub visibility: Visibility,
   /// Publish the head afterwards (when the sketch isn't private).
   pub publish: bool,
+  /// The new tags, validated, or `None` to keep the tags.
+  pub tags: Option<Vec<String>>,
 }
 
 /// What [`update`] reads of a sketch before changing it.
@@ -428,8 +454,9 @@ struct Current {
 /// when they differ from the head, then applies the publishing rules (a
 /// private sketch has no published revision; one leaving private, or
 /// updated with `publish`, publishes its head; otherwise the published
-/// revision stays). `updated_at` changes only when something does, and
-/// `published_at` is set the first time the sketch becomes public.
+/// revision stays), and replaces the tags when given. `updated_at` changes
+/// only when something does, and `published_at` is set the first time the
+/// sketch becomes public.
 pub async fn update(
   db: &SqlitePool,
   id: &str,
@@ -466,7 +493,15 @@ pub async fn update(
   } else {
     published.map(|_| now)
   };
-  let changed = head != current.head_revision
+  let new_tags = match &update.tags {
+    Some(new) if *new != tags::of(&mut tx, id).await? => Some(new),
+    _ => None,
+  };
+  if let Some(new) = new_tags {
+    tags::set(&mut tx, id, new).await?;
+  }
+  let changed = new_tags.is_some()
+    || head != current.head_revision
     || published != current.published_revision
     || update.visibility != current.visibility
     || update.title != current.title
@@ -694,19 +729,31 @@ fn like_pattern(text: &str) -> String {
   pattern
 }
 
-/// A page of publicly listed sketches, optionally matching a search in
-/// their title, description, or author.
+/// A page of publicly listed sketches, optionally only those with a tag
+/// and those matching a search. A search matches a substring of the title,
+/// description, author's username or display name, or of a tag, where it's
+/// compared as a tag ([`validate::normalize_tag`]: `#Ray Marching` finds
+/// `ray-marching`).
 pub async fn explore(
   db: &SqlitePool,
   viewer: &Viewer,
   sort: Sort,
   search: Option<&str>,
+  tag: Option<&str>,
   page: i64,
 ) -> sqlx::Result<Page<SketchRow>> {
   let search = search.map(str::trim).filter(|q| !q.is_empty());
   let search_sql = if search.is_some() {
     " AND (s.title LIKE ? ESCAPE '\\' OR s.description LIKE ? ESCAPE '\\' \
-     OR u.username LIKE ? ESCAPE '\\' OR u.display_name LIKE ? ESCAPE '\\')"
+     OR u.username LIKE ? ESCAPE '\\' OR u.display_name LIKE ? ESCAPE '\\' \
+     OR EXISTS (SELECT 1 FROM sketch_tags qt WHERE qt.sketch_id = s.id \
+     AND qt.tag LIKE ? ESCAPE '\\'))"
+  } else {
+    ""
+  };
+  let tag_sql = if tag.is_some() {
+    " AND EXISTS (SELECT 1 FROM sketch_tags ft WHERE ft.sketch_id = s.id \
+     AND ft.tag = ?)"
   } else {
     ""
   };
@@ -720,8 +767,8 @@ pub async fn explore(
     }
   };
   let sql = format!(
-    "{SELECT} WHERE {LISTED_SKETCH_SQL}{search_sql} ORDER BY {order_sql} \
-     LIMIT ? OFFSET ?"
+    "{SELECT} WHERE {LISTED_SKETCH_SQL}{search_sql}{tag_sql} \
+     ORDER BY {order_sql} LIMIT ? OFFSET ?"
   );
   let mut query = sqlx::query_as(&sql).bind(viewer.id);
   if let Some(search) = search {
@@ -729,6 +776,18 @@ pub async fn explore(
     for _ in 0..4 {
       query = query.bind(pattern.clone());
     }
+    // An empty pattern matches no tag, so a search that's nothing as a tag
+    // (`#`) doesn't match every tagged sketch.
+    let as_tag = validate::normalize_tag(search);
+    let tag_pattern = if as_tag.is_empty() {
+      String::new()
+    } else {
+      like_pattern(&as_tag)
+    };
+    query = query.bind(tag_pattern);
+  }
+  if let Some(tag) = tag {
+    query = query.bind(tag);
   }
   if sort == Sort::Trending {
     query = query.bind(now() - TRENDING_SECONDS);

@@ -5,8 +5,8 @@
 //! ordinary public sketch owned by one user (Ella's account) at that id,
 //! creating it or bringing its title, description, and files up to date.
 //! New files are saved as a new revision and published at once. It never
-//! deletes anything and never touches likes, comments, thumbnails, or
-//! visibility.
+//! deletes anything and never touches likes, comments, thumbnails, tags,
+//! or visibility.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -166,6 +166,7 @@ async fn plan(
       },
       visibility: Visibility::Public,
       forked_from: None,
+      tags: Vec::new(),
     }));
   };
   if row.owner_id != owner_id {
@@ -201,5 +202,6 @@ async fn plan(
     contents: Some(contents),
     visibility: row.visibility,
     publish: true,
+    tags: None,
   }))
 }

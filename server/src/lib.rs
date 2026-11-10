@@ -24,6 +24,7 @@ pub mod seed;
 pub mod site;
 pub mod sketches;
 pub mod state;
+pub mod tags;
 pub mod templates;
 pub mod text;
 pub mod tokens;

@@ -1,13 +1,14 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
-{% block title %}{% if q %}“{{ q }}” — {% endif %}Explore — easl{% endblock %}
+{% block title %}{% if q %}“{{ q }}” — {% endif %}{% if tag %}#{{ tag }} — {% endif %}Explore — easl{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>Explore</h1>
   <form class="search" method="get" action="/" role="search">
     <input type="hidden" name="sort" value="{{ sort }}">
+    {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}
     <label class="visually-hidden" for="search-input">Search sketches</label>
-    <input id="search-input" type="search" name="q" value="{{ q }}" placeholder="Search sketches and people" maxlength="100">
+    <input id="search-input" type="search" name="q" value="{{ q }}" placeholder="Search sketches, tags, and people" maxlength="100">
     <button type="submit">Search</button>
   </form>
 </div>
@@ -16,6 +17,19 @@
   <a href="{{ option.url }}"{% if option.current %} aria-current="page"{% endif %}>{{ option.label }}</a>
   {% endfor %}
 </nav>
+{% if popular_tags %}
+<nav class="tag-row" aria-label="Popular tags">
+  {% for t in popular_tags %}
+  <a class="tag-chip" href="{{ t.url }}"{% if t.current %} aria-current="true" title="Show all sketches"{% endif %}>#{{ t.tag }} <span class="tag-count">{{ t.count }}</span></a>
+  {% endfor %}
+</nav>
+{% endif %}
+{% if tag %}
+<div class="tag-filter">
+  <h2>Tagged <span class="tag-name">#{{ tag }}</span></h2>
+  <a href="{{ clear_tag_url }}">Show all sketches</a>
+</div>
+{% endif %}
 {% if sketches %}
 <div class="grid">
   {% for s in sketches %}{{ m.sketch_card(s) }}{% endfor %}
@@ -23,12 +37,18 @@
 {{ m.pagination(pages) }}
 {% else %}
 <div class="empty">
-  {% if q %}
+  {% if q and tag %}
+  <p>No sketches tagged #{{ tag }} match “{{ q }}”.</p>
+  <p><a href="{{ clear_search_url }}">Clear the search</a></p>
+  {% elif q %}
   <p>No sketches match “{{ q }}”.</p>
-  <p><a href="/?sort={{ sort }}">Clear the search</a></p>
+  <p><a href="{{ clear_search_url }}">Clear the search</a></p>
+  {% elif tag and pages.number == 1 %}
+  <p>No sketches are tagged #{{ tag }}.</p>
+  <p><a href="{{ clear_tag_url }}">Show all sketches</a></p>
   {% elif pages.number > 1 %}
   <p>There’s nothing on this page.</p>
-  <p><a href="/?sort={{ sort }}">Back to the first page</a></p>
+  <p><a href="{{ first_page_url }}">Back to the first page</a></p>
   {% else %}
   <p>No sketches have been published yet.</p>
   <p><a class="button primary" href="/new">Make the first one</a></p>
