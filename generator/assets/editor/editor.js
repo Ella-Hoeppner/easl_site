@@ -1100,9 +1100,6 @@ const formatOnSave = {
   show() {
     const button = $("format-on-save");
     button.setAttribute("aria-checked", String(this.on));
-    button.title = this.on
-      ? "Format on save is on: Ctrl/⌘+S formats the file. Click to turn it off."
-      : "Format on save is off. Click to format the file each time you save (Ctrl/⌘+S).";
   },
 };
 formatOnSave.show();
