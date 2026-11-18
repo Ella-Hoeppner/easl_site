@@ -405,12 +405,14 @@ async fn set_liked(
   Ok(Json(json!({ "liked": liked, "like_count": like_count })))
 }
 
-/// `POST /api/sketches/{id}/like`: `{liked, like_count}`.
+/// `POST /api/sketches/{id}/like`: `{liked, like_count}`. Needs a verified
+/// email address (likes rank sketches on explore); unliking doesn't.
 pub async fn like(
   State(state): State<AppState>,
   ApiUser(user): ApiUser,
   Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
+  user.require_verified("like sketches")?;
   set_liked(&state, &user, &id, true).await
 }
 

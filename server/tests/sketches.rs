@@ -586,6 +586,20 @@ async fn likes() {
     .await;
   assert_eq!(hidden.status, StatusCode::NOT_FOUND);
 
+  // Liking needs a verified email address; unliking doesn't.
+  let mut carol = app.unverified_user("carol").await;
+  let unverified = carol.api(Method::POST, &like, Value::Null).await;
+  assert_eq!(unverified.status, StatusCode::FORBIDDEN);
+  assert!(
+    unverified
+      .text()
+      .contains("Verify your email address to like"),
+    "{}",
+    unverified.text()
+  );
+  let unliked = carol.api(Method::DELETE, &like, Value::Null).await;
+  assert_eq!(unliked.status, StatusCode::OK);
+
   // Likes show on the liker's profile.
   bob.api(Method::POST, &like, Value::Null).await;
   let tab = app.client().get("/u/bob?tab=likes").await.text();

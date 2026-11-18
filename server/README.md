@@ -219,7 +219,7 @@ from a daily cron job or systemd timer, copying the result off the machine (and 
 - **Changing your email needs your password**, and invalidates every outstanding email link (so a link sent to the old address can't verify the new one).
 - **A password reset also verifies the email** (following the link proves the address) and signs the browser in, after ending every other session.
 - **Admins can't be banned** (revoke admin first), and can't ban themselves.
-- **Likes don't need a verified email** (the spec lists publishing, commenting, and reporting). Likes drive "popular" and "trending", so throwaway accounts could game them; requiring verification is a one-line change in `api/sketches.rs`.
+- **Liking needs a verified email**, like publishing, commenting, and reporting: likes drive "popular" and "trending", so throwaway accounts could otherwise game them. Unliking doesn't.
 - **Views count once per viewer per hour** (by user, or by address when signed out), in memory, and never for the owner.
 - **Counters are maintained by SQLite triggers** (`migrations/0001_init.sql`), so they stay right through cascading deletes (an account deleted with its likes and comments), which application code alone would miss.
 - **Playlists** show each viewer only the items they can see (someone else's sketch going private disappears from the playlist for others). Reordering takes the ids the owner sees; items not mentioned keep their relative order after them. Adding an item twice is a no-op; a playlist holds at most 500. Adding someone's unlisted sketch to a public playlist shares its link, which is what unlisted means.
