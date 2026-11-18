@@ -205,13 +205,24 @@ The examples: deploy the site first, then the server. With `--sync-examples-owne
 
 ### Backups
 
-The database is a single SQLite file in WAL mode, so copying it while the server runs can catch it mid-write. Use SQLite's own backup:
+Two layers:
+
+- **Hetzner's backups** of the whole machine (daily, the last 7 kept), turned on in the Hetzner console.
+- **A nightly copy of the database**, `deploy/easl-site-backup`, run by `deploy/easl-site-backup.timer` at about 03:30 UTC. The database is a single SQLite file in WAL mode, so copying the file while the server runs can catch it mid-write; the script uses SQLite's online backup instead, turns the copy into one self-contained file, checks its integrity, and keeps the newest 14 in `/var/backups/easl-site/` (root only: the copies hold email addresses and password hashes). Hetzner's backups include those copies. With no database yet it says so and exits successfully. `EASL_SITE_DB`, `EASL_SITE_BACKUP_DIR`, and `EASL_SITE_BACKUP_KEEP` override its paths and count, for trying it out.
+
+Installing it (as root on the server; it needs the `sqlite3` package):
 
 ```sh
-sqlite3 /var/lib/easl-site/easl-site.db ".backup '/var/backups/easl-site/easl-site-$(date +%F).db'"
+install -m 755 deploy/easl-site-backup /usr/local/sbin/
+install -m 644 deploy/easl-site-backup.service deploy/easl-site-backup.timer /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now easl-site-backup.timer
 ```
 
-from a daily cron job or systemd timer, copying the result off the machine (and pruning old ones). For continuous replication to object storage, [Litestream](https://litestream.io) runs as a sidecar with no changes to the app (`litestream replicate /var/lib/easl-site/easl-site.db s3://…`). Restoring is stopping the service and putting the file back.
+`systemctl start easl-site-backup` runs it now; `journalctl -u easl-site-backup` shows what it did; `systemctl list-timers easl-site-backup.timer` shows the next run.
+
+Restoring: `systemctl stop easl-site`, copy a backup over `/var/lib/easl-site/easl-site.db` (owned by `easl`), delete any `easl-site.db-wal` and `easl-site.db-shm` beside it, and `systemctl start easl-site`.
+
+For a copy off the machine, [Litestream](https://litestream.io) can replicate the database continuously to object storage as a sidecar, with no changes to the app (`litestream replicate /var/lib/easl-site/easl-site.db s3://…`).
 
 ## Decisions to review
 

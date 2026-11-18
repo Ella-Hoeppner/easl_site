@@ -1,0 +1,40 @@
+#!/bin/sh
+# Copies the editor's database into the backup directory with SQLite's
+# online backup, which is safe while the server is writing (a plain copy
+# of a database in WAL mode can catch it mid-write), checks the copy, and
+# keeps the newest $KEEP copies. Installed as
+# /usr/local/sbin/easl-site-backup and run nightly by
+# easl-site-backup.timer; see server/README.md, "Backups".
+set -eu
+umask 077
+DB="${EASL_SITE_DB:-/var/lib/easl-site/easl-site.db}"
+DIR="${EASL_SITE_BACKUP_DIR:-/var/backups/easl-site}"
+KEEP="${EASL_SITE_BACKUP_KEEP:-14}"
+
+if [ ! -f "$DB" ]; then
+  echo "no database at $DB yet; nothing to back up"
+  exit 0
+fi
+mkdir -p "$DIR"
+chmod 700 "$DIR"
+
+out="$DIR/easl-site-$(date +%F).db"
+rm -f "$out.partial"
+sqlite3 "$DB" ".backup '$out.partial'"
+# The copy keeps the database's WAL mode; a rollback journal makes it one
+# self-contained file.
+sqlite3 "$out.partial" 'PRAGMA journal_mode=DELETE' >/dev/null
+check="$(sqlite3 "$out.partial" 'PRAGMA integrity_check')"
+if [ "$check" != "ok" ]; then
+  echo "the backup failed its integrity check: $check" >&2
+  rm -f "$out.partial"
+  exit 1
+fi
+mv "$out.partial" "$out"
+rm -f "$out.partial-wal" "$out.partial-shm"
+echo "backed up $DB to $out ($(du -h "$out" | cut -f1))"
+
+ls -1t "$DIR"/easl-site-*.db | tail -n "+$((KEEP + 1))" | while read -r old; do
+  rm -f -- "$old"
+  echo "removed $old"
+done

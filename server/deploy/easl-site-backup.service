@@ -1,0 +1,6 @@
+[Unit]
+Description=Back up the easl editor's database
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/easl-site-backup
