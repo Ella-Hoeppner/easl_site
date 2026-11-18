@@ -1,7 +1,7 @@
 //! Comments on sketches.
 
 use serde::Serialize;
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteExecutor, SqlitePool};
 
 use crate::auth::Viewer;
 use crate::db::now;
@@ -108,14 +108,38 @@ pub async fn create(
   find(db, id).await?.ok_or(sqlx::Error::RowNotFound)
 }
 
-/// Marks a comment deleted; it stays in the database for moderation.
-pub async fn soft_delete(db: &SqlitePool, id: i64) -> sqlx::Result<()> {
-  sqlx::query(
-    "UPDATE comments SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+/// Marks a comment deleted by `deleted_by` (its author, the sketch's
+/// owner, or an admin), returning whether it wasn't already. It stays in
+/// the database for moderation.
+pub async fn soft_delete(
+  db: impl SqliteExecutor<'_>,
+  id: i64,
+  deleted_by: i64,
+  at: i64,
+) -> sqlx::Result<bool> {
+  let result = sqlx::query(
+    "UPDATE comments SET deleted_at = ?, deleted_by = ? \
+     WHERE id = ? AND deleted_at IS NULL",
   )
-  .bind(now())
+  .bind(at)
+  .bind(deleted_by)
   .bind(id)
   .execute(db)
   .await?;
-  Ok(())
+  Ok(result.rows_affected() > 0)
+}
+
+/// Undoes a comment's deletion, returning whether it was deleted.
+pub async fn restore(
+  db: impl SqliteExecutor<'_>,
+  id: i64,
+) -> sqlx::Result<bool> {
+  let result = sqlx::query(
+    "UPDATE comments SET deleted_at = NULL, deleted_by = NULL \
+     WHERE id = ? AND deleted_at IS NOT NULL",
+  )
+  .bind(id)
+  .execute(db)
+  .await?;
+  Ok(result.rows_affected() > 0)
 }

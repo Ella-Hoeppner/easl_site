@@ -1,12 +1,13 @@
-//! `/api/admin`: moderation actions, for admins only.
+//! `/api/admin`: moderation actions, for admins only. Each is recorded in
+//! the moderation log ([`crate::moderation`]).
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 
 use crate::auth::{ApiUser, CurrentUser};
+use crate::comments;
 use crate::error::{ApiResult, AppError};
-use crate::reports;
-use crate::sketches;
+use crate::moderation;
 use crate::state::AppState;
 use crate::users;
 
@@ -25,7 +26,7 @@ async fn set_hidden(
   hidden: bool,
 ) -> ApiResult<StatusCode> {
   require_admin(user)?;
-  if !sketches::set_hidden(&state.db, id, hidden).await? {
+  if !moderation::set_hidden(&state.db, user.id, id, hidden).await? {
     return Err(AppError::NotFound);
   }
   Ok(StatusCode::NO_CONTENT)
@@ -64,7 +65,7 @@ async fn set_banned(
       "Admins can't be banned; revoke their admin rights first.",
     ));
   }
-  users::set_banned(&state.db, target.id, banned).await?;
+  moderation::set_banned(&state.db, user.id, &target, banned).await?;
   Ok(StatusCode::NO_CONTENT)
 }
 
@@ -95,8 +96,28 @@ pub async fn resolve_report(
 ) -> ApiResult<StatusCode> {
   require_admin(&user)?;
   let id: i64 = id.parse().map_err(|_| AppError::NotFound)?;
-  if !reports::resolve(&state.db, id, user.id).await? {
+  if !moderation::resolve_report(&state.db, user.id, id).await? {
     return Err(AppError::NotFound);
+  }
+  Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/admin/comments/{id}/restore`: undoes a comment's deletion
+/// (400 when it isn't deleted).
+pub async fn restore_comment(
+  State(state): State<AppState>,
+  ApiUser(user): ApiUser,
+  Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+  require_admin(&user)?;
+  let id: i64 = id.parse().map_err(|_| AppError::NotFound)?;
+  let comment = comments::find(&state.db, id)
+    .await?
+    .ok_or(AppError::NotFound)?;
+  if comment.deleted_at.is_none()
+    || !moderation::restore_comment(&state.db, user.id, id).await?
+  {
+    return Err(AppError::bad_request("That comment isn't deleted."));
   }
   Ok(StatusCode::NO_CONTENT)
 }

@@ -1,5 +1,8 @@
 {% extends "base.html" %}
+{% import "macros.html" as m %}
+{% import "admin_macros.html" as a %}
 {% block title %}Moderation — easl{% endblock %}
+
 {% block content %}
 <h1>Moderation</h1>
 
@@ -29,26 +32,38 @@
   </div>
 </section>
 
-<h2>Open reports ({{ reports|length }})</h2>
-{% if reports %}
-<ul class="reports">
-  {% for r in reports %}
-  <li class="panel report">
-    <p class="report-head">
-      <span class="badge">{{ r.kind }}</span>
-      {% if r.kind == "sketch" %}
-        {% if r.sketch_id %}<a href="/s/{{ r.sketch_id }}">{{ r.sketch_title }}</a>{% if r.sketch_hidden %} <span class="badge badge-hidden">hidden</span>{% endif %}{% else %}<span class="dim">sketch {{ r.target }} (deleted)</span>{% endif %}
-      {% elif r.kind == "comment" %}
-        {% if r.comment_id %}comment on <a href="/s/{{ r.sketch_id }}">{{ r.sketch_title }}</a>{% if r.comment_deleted %} <span class="badge badge-hidden">deleted</span>{% endif %}{% else %}<span class="dim">comment {{ r.target }} (deleted)</span>{% endif %}
-      {% else %}
-        {% if r.username %}<a href="/u/{{ r.username }}">@{{ r.username }}</a>{% else %}<span class="dim">user {{ r.target }} (deleted)</span>{% endif %}
-      {% endif %}
-      {% if r.username and r.kind != "user" %}<span class="dim">by <a href="/u/{{ r.username }}">@{{ r.username }}</a></span>{% endif %}
-      {% if r.user_banned %}<span class="badge badge-hidden">banned</span>{% endif %}
-    </p>
-    {% if r.comment_body %}<blockquote>{{ r.comment_body|rich }}</blockquote>{% endif %}
-    <p class="report-reason">{% if r.reason %}{{ r.reason|rich }}{% else %}<span class="dim">No reason given.</span>{% endif %}</p>
-    <p class="dim">Reported by {% if r.reporter_username %}<a href="/u/{{ r.reporter_username }}">@{{ r.reporter_username }}</a>{% else %}a deleted user{% endif %} {{ r.created_at|ago }}</p>
+<nav class="tabs" aria-label="Moderation sections">
+  {% for t in tabs %}
+  <a href="{{ t.url }}"{% if t.current %} aria-current="page"{% endif %}>{{ t.label }}{% if t.count is not none %} ({{ t.count }}){% endif %}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == "reports" %}
+<nav class="subtabs" aria-label="Reports">
+  <a href="{{ open_url }}"{% if not resolved %} aria-current="page"{% endif %}>Open ({{ counts.open_reports }})</a>
+  <a href="{{ resolved_url }}"{% if resolved %} aria-current="page"{% endif %}>Resolved ({{ counts.resolved_reports }})</a>
+</nav>
+{% if resolved %}
+<h2 class="visually-hidden">Resolved reports</h2>
+{% if items %}
+<ul class="admin-list">
+  {% for r in items %}
+  <li class="panel admin-item">
+    {{ a.report_head(r) }}
+    <p class="dim">Resolved {{ r.resolved_at|ago }} {{ a.by(r.resolver_username) }}</p>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty"><p>No resolved reports.</p></div>
+{% endif %}
+{% else %}
+<h2>Open reports ({{ items|length }})</h2>
+{% if items %}
+<ul class="admin-list">
+  {% for r in items %}
+  <li class="panel admin-item">
+    {{ a.report_head(r) }}
     <div class="row">
       <button type="button" class="primary" data-api="/api/admin/reports/{{ r.id }}/resolve" data-method="POST">Resolve</button>
       {% if r.sketch_id %}
@@ -75,4 +90,73 @@
 {% else %}
 <div class="empty"><p>No open reports.</p></div>
 {% endif %}
+{% endif %}
+
+{% elif tab == "banned" %}
+<h2 class="visually-hidden">Banned users</h2>
+{% if items %}
+<ul class="admin-list">
+  {% for u in items %}
+  <li class="panel admin-item admin-row">
+    <img class="avatar avatar-medium" src="/u/{{ u.username }}/avatar.svg" alt="" width="40" height="40" loading="lazy">
+    <div class="admin-item-body">
+      <p class="admin-item-head">
+        <a href="/u/{{ u.username }}" title="Public profile">{{ u.display_name or u.username }}</a>
+        {{ a.mod_link(u.username) }}
+      </p>
+      <p class="dim">Banned {{ u.banned_at|ago }} {{ a.by(u.banned_by) }} · {{ u.sketch_count }} {{ "sketch" if u.sketch_count == 1 else "sketches" }} · {{ u.comment_count }} {{ "comment" if u.comment_count == 1 else "comments" }}</p>
+    </div>
+    <button type="button" data-api="/api/admin/users/{{ u.username }}/unban" data-method="POST">Unban</button>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty"><p>No banned users.</p></div>
+{% endif %}
+
+{% elif tab == "hidden" %}
+<h2 class="visually-hidden">Hidden sketches</h2>
+{% if items %}
+<ul class="admin-list">
+  {% for s in items %}
+  <li class="panel admin-item admin-row">
+    <div class="admin-item-body">
+      <p class="admin-item-head">
+        <a href="/s/{{ s.id }}">{{ s.title }}</a>
+        {% if s.visibility != "public" %}<span class="badge badge-{{ s.visibility }}">{{ s.visibility }}</span>{% endif %}
+        <span class="dim">by {{ a.mod_link(s.owner_username) }}</span>
+        {% if s.owner_banned %}<span class="badge badge-hidden">banned</span>{% endif %}
+      </p>
+      <p class="dim">Hidden {{ s.hidden_at|ago }} {{ a.by(s.hidden_by) }}</p>
+    </div>
+    <button type="button" data-api="/api/admin/sketches/{{ s.id }}/unhide" data-method="POST">Unhide</button>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty"><p>No hidden sketches.</p></div>
+{% endif %}
+
+{% elif tab == "comments" %}
+<h2 class="visually-hidden">Deleted comments</h2>
+{% if items %}
+<ul class="admin-list">
+  {% for c in items %}{{ a.deleted_comment(c) }}{% endfor %}
+</ul>
+{% else %}
+<div class="empty"><p>No deleted comments.</p></div>
+{% endif %}
+
+{% else %}
+<h2 class="visually-hidden">Moderation log</h2>
+{% if items %}
+<ul class="mod-log">
+  {% for e in items %}{{ a.log_entry(e) }}{% endfor %}
+</ul>
+{% else %}
+<div class="empty"><p>No moderation actions yet.</p></div>
+{% endif %}
+{% endif %}
+
+{% if tab != "reports" or resolved %}{{ m.pagination(pages) }}{% endif %}
 {% endblock %}

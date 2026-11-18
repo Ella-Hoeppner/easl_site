@@ -12,7 +12,7 @@
 
 use anyhow::anyhow;
 use serde::Serialize;
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteExecutor, SqlitePool};
 
 use crate::auth::Viewer;
 use crate::db::{ID_ATTEMPTS, is_unique_violation, new_public_id, now};
@@ -561,7 +561,7 @@ pub async fn discard_draft(db: &SqlitePool, id: &str) -> sqlx::Result<()> {
   Ok(())
 }
 
-pub async fn delete(db: &SqlitePool, id: &str) -> sqlx::Result<()> {
+pub async fn delete(db: impl SqliteExecutor<'_>, id: &str) -> sqlx::Result<()> {
   sqlx::query("DELETE FROM sketches WHERE id = ?")
     .bind(id)
     .execute(db)
@@ -569,17 +569,24 @@ pub async fn delete(db: &SqlitePool, id: &str) -> sqlx::Result<()> {
   Ok(())
 }
 
-/// Hides a sketch from everyone but its owner and admins, or un-hides it.
+/// Hides a sketch from everyone but its owner and admins (as of `at`), or
+/// un-hides it, returning whether that changed it: hiding a hidden sketch
+/// keeps the time it was hidden.
 pub async fn set_hidden(
-  db: &SqlitePool,
+  db: impl SqliteExecutor<'_>,
   id: &str,
   hidden: bool,
+  at: i64,
 ) -> sqlx::Result<bool> {
-  let result = sqlx::query("UPDATE sketches SET hidden_at = ? WHERE id = ?")
-    .bind(hidden.then(now))
-    .bind(id)
-    .execute(db)
-    .await?;
+  let result = sqlx::query(
+    "UPDATE sketches SET hidden_at = ? \
+     WHERE id = ? AND (hidden_at IS NULL) = ?",
+  )
+  .bind(hidden.then_some(at))
+  .bind(id)
+  .bind(hidden)
+  .execute(db)
+  .await?;
   Ok(result.rows_affected() > 0)
 }
 
@@ -705,9 +712,14 @@ pub struct Page<T> {
 
 impl<T> Page<T> {
   /// Splits a fetch of `PAGE_SIZE + 1` rows into a page.
-  fn from_overfetch(mut items: Vec<T>) -> Self {
-    let has_more = items.len() as i64 > PAGE_SIZE;
-    items.truncate(PAGE_SIZE as usize);
+  fn from_overfetch(items: Vec<T>) -> Self {
+    Self::split(items, PAGE_SIZE)
+  }
+
+  /// Splits a fetch of `size + 1` rows into a page of `size`.
+  pub fn split(mut items: Vec<T>, size: i64) -> Self {
+    let has_more = items.len() as i64 > size;
+    items.truncate(size as usize);
     Page { items, has_more }
   }
 }

@@ -9,7 +9,9 @@ use serde_json::{Value, json};
 use super::ApiJson;
 use crate::auth::{ApiUser, MaybeUser, Viewer};
 use crate::comments::{self, Comment};
+use crate::db::now;
 use crate::error::{ApiResult, AppError};
+use crate::moderation;
 use crate::ratelimit::Action;
 use crate::sketches;
 use crate::state::AppState;
@@ -53,7 +55,9 @@ pub async fn create(
   Ok((StatusCode::CREATED, Json(comment.to_api(&viewer))))
 }
 
-/// `DELETE /api/comments/{id}` (author, sketch owner, or admin).
+/// `DELETE /api/comments/{id}` (author, sketch owner, or admin). An admin
+/// deleting someone else's comment on someone else's sketch is moderating,
+/// and the moderation log records it.
 pub async fn delete(
   State(state): State<AppState>,
   ApiUser(user): ApiUser,
@@ -71,6 +75,10 @@ pub async fn delete(
       "Only the comment's author or the sketch's owner can delete it.",
     ));
   }
-  comments::soft_delete(&state.db, id).await?;
+  if viewer.is(comment.user_id) || viewer.is(comment.sketch_owner_id) {
+    comments::soft_delete(&state.db, id, user.id, now()).await?;
+  } else {
+    moderation::delete_comment(&state.db, user.id, id).await?;
+  }
   Ok(StatusCode::NO_CONTENT)
 }

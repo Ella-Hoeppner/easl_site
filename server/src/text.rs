@@ -115,6 +115,15 @@ pub fn url_encode(text: &str) -> String {
   out
 }
 
+/// The first `max_chars` characters of `text`, with `…` added when it's
+/// longer.
+pub fn excerpt(text: &str, max_chars: usize) -> String {
+  match text.char_indices().nth(max_chars) {
+    Some((end, _)) => format!("{}…", &text[..end]),
+    None => text.to_string(),
+  }
+}
+
 /// A unix timestamp as a calendar date ("March 4, 2026").
 pub fn format_date(timestamp: i64) -> String {
   OffsetDateTime::from_unix_timestamp(timestamp)
@@ -206,6 +215,13 @@ mod tests {
   #[test]
   fn url_encoding() {
     assert_eq!(url_encode("/s/a?b=c&d"), "/s/a%3Fb%3Dc%26d");
+  }
+
+  #[test]
+  fn excerpts() {
+    assert_eq!(excerpt("short", 5), "short");
+    assert_eq!(excerpt("longer", 5), "longe…");
+    assert_eq!(excerpt("ééé", 2), "éé…");
   }
 
   #[test]

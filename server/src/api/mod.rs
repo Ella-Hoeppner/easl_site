@@ -91,6 +91,10 @@ pub fn router() -> Router<AppState> {
       "/api/admin/reports/{id}/resolve",
       post(admin::resolve_report),
     )
+    .route(
+      "/api/admin/comments/{id}/restore",
+      post(admin::restore_comment),
+    )
     .route("/api", get(not_found))
     .route("/api/{*rest}", get(not_found).fallback(not_found))
 }

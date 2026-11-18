@@ -42,6 +42,14 @@ const TEMPLATES: &[(&str, &str)] = &[
   ("message.html", include_str!("../templates/message.html")),
   ("settings.html", include_str!("../templates/settings.html")),
   ("admin.html", include_str!("../templates/admin.html")),
+  (
+    "admin_macros.html",
+    include_str!("../templates/admin_macros.html"),
+  ),
+  (
+    "admin_user.html",
+    include_str!("../templates/admin_user.html"),
+  ),
   ("error.html", include_str!("../templates/error.html")),
   ("editor.html", include_str!("../templates/editor.html")),
 ];

@@ -23,6 +23,7 @@ use easl_site_server::config::Config;
 use easl_site_server::db;
 use easl_site_server::examples;
 use easl_site_server::mail::Mailer;
+use easl_site_server::moderation;
 use easl_site_server::seed;
 use easl_site_server::site;
 use easl_site_server::state::AppState;
@@ -287,12 +288,16 @@ async fn admin(db: &Path, action: AdminAction) -> anyhow::Result<()> {
     AdminAction::Grant { username } => (username, true),
     AdminAction::Revoke { username } => (username, false),
   };
-  if !users::set_admin(&pool, username, grant).await? {
+  let Some(changed) = moderation::set_admin(&pool, username, grant).await?
+  else {
     bail!("there's no user named {username:?}");
-  }
-  println!(
-    "{username} {} an admin.",
-    if grant { "is now" } else { "is no longer" }
-  );
+  };
+  let state = match (changed, grant) {
+    (true, true) => "is now",
+    (true, false) => "is no longer",
+    (false, true) => "was already",
+    (false, false) => "wasn't",
+  };
+  println!("{username} {state} an admin.");
   Ok(())
 }

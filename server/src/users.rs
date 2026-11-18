@@ -1,7 +1,7 @@
 //! Accounts: the `users` table and the public shapes of a user.
 
 use serde::Serialize;
-use sqlx::{FromRow, SqliteExecutor, SqlitePool};
+use sqlx::{FromRow, SqliteConnection, SqliteExecutor, SqlitePool};
 
 use crate::db::{is_unique_violation, now};
 use crate::error::AppError;
@@ -275,30 +275,35 @@ pub async fn delete(db: &SqlitePool, id: i64) -> sqlx::Result<()> {
   Ok(())
 }
 
-/// Bans or unbans a user. Banning also ends their sessions.
+/// Bans a user (as of `at`) or unbans them, returning whether that changed
+/// anything: banning a banned user keeps the time they were banned.
+/// Banning also ends their sessions.
 pub async fn set_banned(
-  db: &SqlitePool,
+  conn: &mut SqliteConnection,
   id: i64,
   banned: bool,
-) -> sqlx::Result<()> {
-  let mut tx = db.begin().await?;
-  sqlx::query("UPDATE users SET banned_at = ? WHERE id = ?")
-    .bind(banned.then(now))
-    .bind(id)
-    .execute(&mut *tx)
-    .await?;
+  at: i64,
+) -> sqlx::Result<bool> {
+  let result = sqlx::query(
+    "UPDATE users SET banned_at = ? WHERE id = ? AND (banned_at IS NULL) = ?",
+  )
+  .bind(banned.then_some(at))
+  .bind(id)
+  .bind(banned)
+  .execute(&mut *conn)
+  .await?;
   if banned {
     sqlx::query("DELETE FROM sessions WHERE user_id = ?")
       .bind(id)
-      .execute(&mut *tx)
+      .execute(&mut *conn)
       .await?;
   }
-  tx.commit().await
+  Ok(result.rows_affected() > 0)
 }
 
 /// Grants or revokes admin rights, returning whether the user exists.
 pub async fn set_admin(
-  db: &SqlitePool,
+  db: impl SqliteExecutor<'_>,
   username: &str,
   admin: bool,
 ) -> sqlx::Result<bool> {

@@ -74,6 +74,7 @@ pub fn router() -> Router<AppState> {
     )
     .route("/settings/delete", post(settings::delete_account))
     .route("/admin", get(admin::admin))
+    .route("/admin/users/{username}", get(admin::user))
 }
 
 /// The editor host's 404 page, for paths nothing else serves.

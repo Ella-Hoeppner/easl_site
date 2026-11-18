@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use super::{ApiJson, nullable};
 use crate::auth::{ApiUser, CurrentUser, MaybeUser, Viewer};
 use crate::error::{ApiResult, AppError};
+use crate::moderation;
 use crate::ratelimit::Action;
 use crate::revisions::{self, Contents};
 use crate::sketches::{
@@ -234,7 +235,8 @@ pub async fn update(
   Ok(Json(reload(&state, &id, &viewer).await?))
 }
 
-/// `DELETE /api/sketches/{id}` (owner or admin).
+/// `DELETE /api/sketches/{id}` (owner or admin; the moderation log records
+/// an admin deleting someone else's sketch).
 pub async fn delete(
   State(state): State<AppState>,
   ApiUser(user): ApiUser,
@@ -247,7 +249,11 @@ pub async fn delete(
       "Only the sketch's owner can delete it.",
     ));
   }
-  sketches::delete(&state.db, &id).await?;
+  if viewer.is(row.owner_id) {
+    sketches::delete(&state.db, &id).await?;
+  } else {
+    moderation::delete_sketch(&state.db, user.id, &id).await?;
+  }
   Ok(StatusCode::NO_CONTENT)
 }
 

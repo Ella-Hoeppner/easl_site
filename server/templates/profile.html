@@ -6,7 +6,7 @@
 <section class="profile-head">
   <img class="avatar avatar-large" src="{{ profile.avatar_url }}" alt="" width="96" height="96">
   <div class="profile-info">
-    <h1>{{ profile.display_name }}</h1>
+    <h1>{{ profile.display_name }}{% if me and me.is_admin %} <a class="mod-view-link" href="/admin/users/{{ profile.username }}" title="Moderation view" aria-label="Moderation view"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 1 2.5 3v4.2c0 3.4 2.3 6.4 5.5 7.8 3.2-1.4 5.5-4.4 5.5-7.8V3L8 1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></a>{% endif %}</h1>
     <p class="handle">@{{ profile.username }}{% if profile.banned %} <span class="badge badge-hidden">banned</span>{% endif %}</p>
     {% if profile.bio %}<p class="bio">{{ profile.bio|rich }}</p>{% endif %}
     <p class="stats">

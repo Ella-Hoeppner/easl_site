@@ -1,0 +1,92 @@
+{#- Pieces of the admin area's pages. Usernames link to users' moderation
+    pages (`/admin/users/<name>`), which link on to public profiles. -#}
+
+{% macro mod_link(username) -%}
+<a href="/admin/users/{{ username }}">@{{ username }}</a>
+{%- endmacro %}
+
+{% macro user_link(username, exists=true) -%}
+{% if not username %}<span class="dim">a deleted user</span>{% elif exists %}{{ mod_link(username) }}{% else %}@{{ username }}{% endif %}
+{%- endmacro %}
+
+{% macro sketch_link(id, title, exists=true) -%}
+{% if exists and id %}<a href="/s/{{ id }}">“{{ title }}”</a>{% elif title %}“{{ title }}” <span class="dim">(deleted)</span>{% else %}<span class="dim">a deleted sketch</span>{% endif %}
+{%- endmacro %}
+
+{% macro by(username) -%}
+by {% if username %}{{ mod_link(username) }}{% else %}<span class="dim">unknown</span>{% endif %}
+{%- endmacro %}
+
+{% macro report_head(r) -%}
+<p class="admin-item-head">
+  <span class="badge">{{ r.kind }}</span>
+  {% if r.kind == "sketch" %}
+    {% if r.sketch_id %}<a href="/s/{{ r.sketch_id }}">{{ r.sketch_title }}</a>{% if r.sketch_hidden %} <span class="badge badge-hidden">hidden</span>{% endif %}{% else %}<span class="dim">sketch {{ r.target }} (deleted)</span>{% endif %}
+  {% elif r.kind == "comment" %}
+    {% if r.comment_id %}comment on <a href="/s/{{ r.sketch_id }}">{{ r.sketch_title }}</a>{% if r.comment_deleted %} <span class="badge badge-hidden">deleted</span>{% endif %}{% else %}<span class="dim">comment {{ r.target }} (deleted)</span>{% endif %}
+  {% else %}
+    {% if r.username %}{{ mod_link(r.username) }}{% else %}<span class="dim">user {{ r.target }} (deleted)</span>{% endif %}
+  {% endif %}
+  {% if r.username and r.kind != "user" %}<span class="dim">by {{ mod_link(r.username) }}</span>{% endif %}
+  {% if r.user_banned %}<span class="badge badge-hidden">banned</span>{% endif %}
+</p>
+{% if r.comment_body %}<blockquote>{{ r.comment_body|rich }}</blockquote>{% endif %}
+<p class="report-reason">{% if r.reason %}{{ r.reason|rich }}{% else %}<span class="dim">No reason given.</span>{% endif %}</p>
+<p class="dim">Reported by {% if r.reporter_username %}{{ mod_link(r.reporter_username) }}{% else %}a deleted user{% endif %} {{ r.created_at|ago }}</p>
+{%- endmacro %}
+
+{% macro report_status(r) -%}
+<p class="dim">{% if r.resolved_at %}Resolved {{ r.resolved_at|ago }} {{ by(r.resolver_username) }}{% else %}<span class="badge badge-unlisted">open</span>{% endif %}</p>
+{%- endmacro %}
+
+{% macro log_entry(e) -%}
+{% set who = user_link(e.target_username, e.target_user_exists) %}
+{% set sketch = sketch_link(e.sketch_id, e.sketch_title, e.sketch_exists) %}
+<li>
+  <p>
+    {% if e.admin_username %}{{ mod_link(e.admin_username) }}
+    {% elif e.note == "command line" %}The command line
+    {% else %}<span class="dim">A deleted account</span>
+    {% endif %}
+    {% if e.action == "hide_sketch" %}hid {{ sketch }} by {{ who }}
+    {% elif e.action == "unhide_sketch" %}unhid {{ sketch }} by {{ who }}
+    {% elif e.action == "delete_sketch" %}deleted the sketch {{ sketch }} by {{ who }}
+    {% elif e.action == "delete_comment" %}deleted a comment by {{ who }} on {{ sketch }}
+    {% elif e.action == "restore_comment" %}restored a comment by {{ who }} on {{ sketch }}
+    {% elif e.action == "ban_user" %}banned {{ who }}
+    {% elif e.action == "unban_user" %}unbanned {{ who }}
+    {% elif e.action == "grant_admin" %}made {{ who }} an admin
+    {% elif e.action == "revoke_admin" %}took away {{ who }}’s admin rights
+    {% elif e.action == "resolve_report" %}resolved report #{{ e.target }}
+      {% if e.report_kind == "sketch" %}about {{ sketch }} by {{ who }}
+      {% elif e.report_kind == "comment" %}about a comment by {{ who }} on {{ sketch }}
+      {% elif e.report_kind == "user" %}about {{ who }}
+      {% endif %}
+    {% else %}{{ e.action }} {{ e.target_kind }} {{ e.target }}
+    {% endif %}
+    <span class="dim">· {{ e.created_at|ago }}</span>
+  </p>
+  {% if e.detail %}<blockquote>{{ e.detail|rich }}</blockquote>{% endif %}
+  {% if e.action == "resolve_report" and e.report_reason %}<p class="dim">Reason: {{ e.report_reason|rich }}</p>{% endif %}
+</li>
+{%- endmacro %}
+
+{% macro deleted_comment(c) -%}
+<li class="panel admin-item">
+  <p class="admin-item-head">
+    <span>{{ mod_link(c.author_username) }} on <a href="/s/{{ c.sketch_id }}">{{ c.sketch_title }}</a></span>
+    {% if c.author_banned %}<span class="badge badge-hidden">banned</span>{% endif %}
+  </p>
+  <blockquote>{{ c.body|rich }}</blockquote>
+  <p class="dim">Written {{ c.created_at|ago }} · deleted {{ c.deleted_at|ago }} by
+    {% if c.deleted_role == "author" %}the author
+    {% elif c.deleted_role == "owner" %}the sketch owner
+    {% elif c.deleted_role == "moderator" %}moderator {{ mod_link(c.deleted_by) }}
+    {% else %}<span class="dim">unknown</span>
+    {% endif %}
+  </p>
+  <div class="row">
+    <button type="button" data-api="/api/admin/comments/{{ c.id }}/restore" data-method="POST">Restore</button>
+  </div>
+</li>
+{%- endmacro %}

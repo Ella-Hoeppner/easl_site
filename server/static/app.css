@@ -983,13 +983,13 @@ input[type="checkbox"] {
   flex-wrap: nowrap;
 }
 
-.reports {
+.admin-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.report-head {
+.admin-item-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -998,15 +998,164 @@ input[type="checkbox"] {
   font-weight: 600;
 }
 
-.report blockquote {
+.admin-item blockquote,
+.mod-log blockquote {
   margin: 0.4rem 0;
   padding: 0.4rem 0.8rem;
   border-left: 3px solid var(--border);
   color: var(--text-dim);
+  overflow-wrap: anywhere;
 }
 
-.report .dim {
+.admin-item .dim,
+.mod-log .dim {
   font-size: 0.86rem;
+}
+
+.admin-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem 1rem;
+}
+
+.admin-row .admin-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-row .admin-item-body > p {
+  margin: 0.15rem 0;
+}
+
+.avatar-medium {
+  width: 40px;
+  height: 40px;
+}
+
+.subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: -0.6rem 0 1.2rem;
+}
+
+.subtabs a {
+  padding: 0.2rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.subtabs a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.subtabs a[aria-current="page"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mod-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mod-log li {
+  padding: 0.7rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.mod-log p {
+  margin: 0;
+}
+
+.mod-log li > * + * {
+  margin-top: 0.35rem;
+}
+
+@media (max-width: 560px) {
+  .admin-row {
+    flex-wrap: wrap;
+  }
+}
+
+/* The moderation view of a user: set apart from their profile. */
+
+.mod-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.9rem;
+  margin-bottom: 1.2rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  font-size: 0.9rem;
+}
+
+.mod-banner-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--warn);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mod-banner a {
+  margin-left: auto;
+}
+
+.mod-user-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.4rem;
+}
+
+.mod-user-head h1 {
+  margin: 0;
+}
+
+.mod-user-head p {
+  margin: 0.3rem 0 0;
+}
+
+.mod-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.4rem 1.2rem;
+  margin: 1.2rem 0;
+}
+
+.mod-facts dt {
+  color: var(--text-dim);
+}
+
+.mod-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mod-section {
+  margin-top: 2rem;
+}
+
+.mod-view-link {
+  display: inline-flex;
+  vertical-align: middle;
+  color: var(--text-dim);
+}
+
+.mod-view-link:hover {
+  color: var(--accent);
 }
 
 /* ---- toast ---- */

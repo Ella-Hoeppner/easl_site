@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
@@ -60,7 +61,17 @@ impl TestApp {
 
   /// An app whose configuration `adjust` can change first.
   pub async fn with_config(adjust: impl FnOnce(&mut Config)) -> Self {
-    let dir = TempDir::new().expect("temp dir");
+    Self::build(TempDir::new().expect("temp dir"), adjust).await
+  }
+
+  /// An app over the database already at [`database_path`] in `dir` (made
+  /// by a test, say, with older migrations), migrating it as the server
+  /// does at startup.
+  pub async fn with_database_in(dir: TempDir) -> Self {
+    Self::build(dir, |_| {}).await
+  }
+
+  async fn build(dir: TempDir, adjust: impl FnOnce(&mut Config)) -> Self {
     let site = dir.path().join("site");
     for sub in ["editor", "easl-web"] {
       fs::create_dir_all(site.join(sub)).expect("site dir");
@@ -79,7 +90,7 @@ impl TestApp {
     let mut config = Config::new(site, ORIGIN, DOCS_ORIGIN, false);
     config.limits = relaxed_limits();
     adjust(&mut config);
-    let pool = db::open(&dir.path().join("test.db")).await.expect("db");
+    let pool = db::open(&database_path(&dir)).await.expect("db");
     let (mailer, mail) = Mailer::capture();
     let state = AppState::new(config, pool, mailer).expect("state");
     TestApp {
@@ -88,6 +99,11 @@ impl TestApp {
       mail,
       _dir: dir,
     }
+  }
+
+  /// Where the app's database lives.
+  pub fn database_path(&self) -> PathBuf {
+    database_path(&self._dir)
   }
 
   /// A signed-out client of the editor host.
@@ -174,6 +190,11 @@ impl TestApp {
   }
 }
 
+/// Where a test app's database lives in its directory.
+pub fn database_path(dir: &TempDir) -> PathBuf {
+  dir.path().join("test.db")
+}
+
 pub fn email_of(username: &str) -> String {
   format!("{username}@example.com")
 }
@@ -194,6 +215,33 @@ impl TestResponse {
   /// decoded, for matching readable text. Markup stays escaped.
   pub fn page(&self) -> String {
     self.text().replace("&#x27;", "'").replace("&#x2f;", "/")
+  }
+
+  /// The page's text as a reader sees it: tags dropped, whitespace runs
+  /// collapsed, and common entities decoded, for matching sentences that
+  /// span links.
+  pub fn visible_text(&self) -> String {
+    let mut text = String::new();
+    let mut in_tag = false;
+    for c in self.text().chars() {
+      match c {
+        '<' => in_tag = true,
+        '>' if in_tag => in_tag = false,
+        _ if !in_tag => text.push(c),
+        _ => {}
+      }
+    }
+    text
+      .replace("&#x27;", "'")
+      .replace("&#39;", "'")
+      .replace("&#x2f;", "/")
+      .replace("&quot;", "\"")
+      .replace("&lt;", "<")
+      .replace("&gt;", ">")
+      .replace("&amp;", "&")
+      .split_whitespace()
+      .collect::<Vec<_>>()
+      .join(" ")
   }
 
   pub fn json(&self) -> Value {

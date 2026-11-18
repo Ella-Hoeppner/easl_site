@@ -24,7 +24,7 @@ Browsers resolve `*.localhost` to the loopback address, so `http://editor.localh
 - reloads templates (`templates/`) and app assets (`static/`) from disk on every request, so design changes show on refresh,
 - logs emails instead of sending them (unless SMTP is configured) and shows verification and reset links on the page in a "Dev mode" box.
 
-`cargo run -- admin grant alice` makes a user an admin; it takes effect on their next request, and `/admin` appears in their account menu.
+`cargo run -- admin grant alice` makes a user an admin; it takes effect on their next request, and `/admin` appears in their account menu. Granting and revoking are recorded in the moderation log.
 
 Tests: `cargo test` (integration tests in `tests/` run the real router against a fresh SQLite file each). `cargo clippy --all-targets` and `cargo fmt` should be clean.
 
@@ -66,6 +66,7 @@ The docs' example programs are ordinary public sketches owned by `ella` (Ella's 
 | `src/security.rs` | the CSRF check and client addresses |
 | `src/ratelimit.rs` | in-memory sliding-window limits |
 | `src/users.rs`, `sketches.rs`, `playlists.rs`, `comments.rs`, `reports.rs` | the data layer and the API's JSON shapes |
+| `src/moderation.rs` | admin actions and the moderation log, and the admin pages' lists |
 | `src/revisions.rs` | sketch revisions: every saved version of a sketch's program |
 | `src/tags.rs` | sketch tags, and the most-used ones |
 | `src/visibility.rs` | who can see what (one rule, used everywhere) |
@@ -103,13 +104,31 @@ The sketch JSON (and the summaries in listings) has `tags: [string]`. `POST /api
 
 Explore takes `?tag=<tag>` (normalized the same way): only listed sketches with that tag, under a "Tagged #tag" heading with a link back to all sketches; the sort tabs, search form, and pages keep it. Above the grid is a row of the 16 tags on the most listed sketches (ties by name, counting only what's listed: public, not hidden, owner not banned), each linking to its filter with the sort and search kept, the current one highlighted and linking back to all. Cards show their first 3 tags as links.
 
+### Moderation
+
+Admins (`admin grant`, below) moderate from `/admin`. Every admin action goes through `src/moderation.rs`, which makes the change and records it in the **moderation log** (`moderation_actions`, `migrations/0004_moderation_log.sql`) in one transaction: hiding and unhiding a sketch, deleting someone else's sketch, deleting a comment on someone else's sketch by someone else, restoring a comment, banning and unbanning, resolving a report, and granting or revoking admin rights from the command line (logged with no admin and the note `command line`). A row holds the admin (NULL once their account is deleted), the action, the target's kind and id (sketch id, comment id, username, report id), and what the log shows of the target as it was then (the user it is or belongs to, the sketch it is or is on and its title, a 200-character comment excerpt), so it stays readable after deletions. People acting on their own content (an author deleting their comment, an owner deleting their sketch or a comment on it) aren't moderating and aren't logged, admins included. Actions that change nothing (hiding a hidden sketch, banning a banned user, resolving a resolved report) aren't logged, and keep the original `hidden_at`/`banned_at`/`resolved_at`.
+
+Comments are soft-deleted (`deleted_at`) and record who deleted them (`deleted_by`, NULL for deletions made before it was recorded or by an account since deleted), so the admin pages tell the author, the sketch's owner, and a moderator apart. `POST /api/admin/comments/<id>/restore` undoes a deletion (404 for an unknown comment, 400 when it isn't deleted); a trigger counts the comment again. The migration put the reports already resolved into the log (who resolved each and when, with its target as it was at migration time); earlier bans, hides, and deletions weren't recorded, so the pages say "unknown" for who did them.
+
+`/admin` has tabs (`?tab=reports|banned|hidden|comments|log`, with the Quick actions panel above them, counts in the labels):
+
+- **Reports**: open reports, oldest first, with their actions; `?resolved=1` lists resolved ones, newest first, with who resolved them and when.
+- **Banned users**: newest ban first, with who banned them (from the log), their sketch and comment counts, and Unban.
+- **Hidden sketches**: newest first, with the owner, who hid it, and Unhide.
+- **Deleted comments**: newest first, with the sketch, the author, and who deleted it ("the author", "the sketch owner", "moderator @name", or "unknown"), and Restore.
+- **Log**: every action newest first, as sentences ("@ella banned @bob", "@ella deleted a comment by @bob on “…”").
+
+Every list but the open reports pages by 50. Usernames on the admin pages link to users' moderation pages; a display name on the Banned tab, and each moderation page, link to the public profile.
+
+**A user's moderation page**, `/admin/users/<username>` (`?list=submitted|against|actions|comments&page=`), is the "moderator mode" view of an account, kept apart from the profile so admins browsing the site see what everyone sees: under a "Moderation view" banner, the account's facts (its **email address**, as a `mailto:` link so moderators can follow up by email, whether it's verified, when it joined, admin status, and ban status with who banned it and a Ban/Unban button, which admins' pages don't offer), its sketch count with how many are hidden or private, its comment and deleted-comment counts, the reports it submitted and the reports against it (of the user, their sketches, or their comments), each with its status, the log entries involving it, and its deleted comments. The overview shows the newest 10 of each list with a "Show all" link to that list alone, paged by 50. Profiles show admins a small shield icon beside the name linking there, and the Reports tab links each reporter's and reported user's page. Email addresses appear nowhere else (no other page and no API response shows anyone's).
+
 ### Routes
 
-On the editor host — pages: `/` (explore: `?sort=new|popular|trending&q=&tag=&page=`; `/explore` redirects there with its query), `/u/<username>` (`?tab=sketches|playlists|likes&page=`), `/u/<username>/avatar.svg`, `/p/<id>`, `/playlists/new` (the form; it posts back to itself and goes to the new playlist), `/s/<id>` (`?playlist=`), `/s/<id>/thumb`, `/new`, `/login`, `/signup`, `POST /logout`, `/forgot`, `/reset/<token>`, `/verify/<token>`, `/settings` (forms post to `/settings/profile|email|password|verification|delete`), `/admin`. Files: `/static/…` (the app's assets), and from the site directory only `/editor/…` and `/easl-web/…` (`?v=` URLs cached for a year, others revalidated). Anything else is a 404.
+On the editor host — pages: `/` (explore: `?sort=new|popular|trending&q=&tag=&page=`; `/explore` redirects there with its query), `/u/<username>` (`?tab=sketches|playlists|likes&page=`), `/u/<username>/avatar.svg`, `/p/<id>`, `/playlists/new` (the form; it posts back to itself and goes to the new playlist), `/s/<id>` (`?playlist=`), `/s/<id>/thumb`, `/new`, `/login`, `/signup`, `POST /logout`, `/forgot`, `/reset/<token>`, `/verify/<token>`, `/settings` (forms post to `/settings/profile|email|password|verification|delete`), `/admin` (`?tab=reports|banned|hidden|comments|log&resolved=1&page=`), `/admin/users/<username>` (`?list=submitted|against|actions|comments&page=`). Files: `/static/…` (the app's assets), and from the site directory only `/editor/…` and `/easl-web/…` (`?v=` URLs cached for a year, others revalidated). Anything else is a 404.
 
 On the docs host: `/playground` and `/playground.html` redirect (308) to `<editor-origin>/s/<sketch id>` for a known `?example=<id>`, else to `<editor-origin>/new`; paths whose first segment is one of the app's (`explore`, `new`, `s`, `u`, `p`, `playlists`, `login`, `signup`, `logout`, `forgot`, `reset`, `verify`, `settings`, `admin`, `api`) redirect (308) to the same path and query on the editor host. Everything else is the static site.
 
-API (`/api`): `GET me`, `GET me/sketches`, `GET me/playlists`; `POST sketches`; `GET|PUT|DELETE sketches/<id>` (`PUT` takes any of `title`, `description`, `files`, `entry_file`, `entry_name`, `visibility`, `tags`); `POST sketches/<id>/publish`, `POST sketches/<id>/discard-draft` (owner); `GET sketches/<id>/published` (`{revision, files, entry_file, entry_name, published_at}`, 404 when nothing is published); `GET sketches/<id>/revisions` (owner; `{revisions: [{number, created_at, published, head}]}`, newest first); `POST sketches/<id>/fork`; `PUT sketches/<id>/thumbnail`; `POST|DELETE sketches/<id>/like`; `GET|POST sketches/<id>/comments`; `DELETE comments/<id>`; `POST playlists`; `GET|PUT|DELETE playlists/<id>`; `POST playlists/<id>/items`; `DELETE playlists/<id>/items/<sketch_id>`; `PUT playlists/<id>/order`; `POST reports`; `POST admin/sketches/<id>/hide|unhide`, `admin/users/<username>/ban|unban`, `admin/reports/<id>/resolve`. Errors are `{"error": "…"}` with 400/401/403/404/409/413/429.
+API (`/api`): `GET me`, `GET me/sketches`, `GET me/playlists`; `POST sketches`; `GET|PUT|DELETE sketches/<id>` (`PUT` takes any of `title`, `description`, `files`, `entry_file`, `entry_name`, `visibility`, `tags`); `POST sketches/<id>/publish`, `POST sketches/<id>/discard-draft` (owner); `GET sketches/<id>/published` (`{revision, files, entry_file, entry_name, published_at}`, 404 when nothing is published); `GET sketches/<id>/revisions` (owner; `{revisions: [{number, created_at, published, head}]}`, newest first); `POST sketches/<id>/fork`; `PUT sketches/<id>/thumbnail`; `POST|DELETE sketches/<id>/like`; `GET|POST sketches/<id>/comments`; `DELETE comments/<id>`; `POST playlists`; `GET|PUT|DELETE playlists/<id>`; `POST playlists/<id>/items`; `DELETE playlists/<id>/items/<sketch_id>`; `PUT playlists/<id>/order`; `POST reports`; `POST admin/sketches/<id>/hide|unhide`, `admin/users/<username>/ban|unban`, `admin/reports/<id>/resolve`, `admin/comments/<id>/restore`. Errors are `{"error": "…"}` with 400/401/403/404/409/413/429.
 
 ## Production
 
@@ -158,7 +177,7 @@ easl-lang.org {
 
   # The old playground and the app's paths: the server redirects them to
   # the editor host.
-  @moved path /playground /playground.html /explore /explore/* /new /s/* /u/* /p/* /playlists/* /login /signup /logout /forgot /reset/* /verify/* /settings /settings/* /admin /api /api/*
+  @moved path /playground /playground.html /explore /explore/* /new /s/* /u/* /p/* /playlists/* /login /signup /logout /forgot /reset/* /verify/* /settings /settings/* /admin /admin/* /api /api/*
   handle @moved {
     reverse_proxy 127.0.0.1:8000
   }
@@ -223,10 +242,13 @@ from a daily cron job or systemd timer, copying the result off the machine (and 
 - **`seed` tags the examples that have no tags** each time it runs (so an existing database gets them too), and tags the other demo users' sketches when it makes them; on a database seeded before tags existed, those stay untagged.
 - **Templates are embedded with `include_str!`** (one list in `src/templates.rs`; a template missing from it fails every test that renders it), and dev mode reads from `CARGO_MANIFEST_DIR`, so `--dev` is meant for `cargo run` in this directory.
 - **The origins default from the bind port** (`http://editor.localhost:<port>`, `http://localhost:<port>`), so `--bind 127.0.0.1:8150` works without passing either.
+- **The moderation log's `action` and `target_kind` aren't `CHECK`ed in SQL** (unlike `reports.kind`), so a new kind of action needs no table rebuild; `moderation::Action` lists them.
+- **An admin deleting a comment counts as moderating only when it's neither their comment nor on their sketch**; as an author or owner they're logged like anyone else (not at all), and the Deleted comments tab labels them "the author" or "the sketch owner".
+- **Resolved reports show no actions** on the Reports tab (nothing reopens a report).
+- **A user's moderation page** shows the log entries *about* them, not the ones they took as an admin (the Log tab has those).
 - **Reserved usernames** are in `src/validate.rs` (`RESERVED_USERNAMES`; `editor` and `playground` are among them); worth a look before launch. `ella` isn't reserved, since that would stop Ella signing up as `ella`; see the production note about registering it first.
 
 ## Not done
 
 - No email change confirmation to the *old* address, no "sign out everywhere" button, no 2FA.
-- No moderation log (who hid or banned what, beyond `reports.resolved_by`) and no admin view of hidden sketches outside reports.
 - No pagination on comments or a profile's playlists.

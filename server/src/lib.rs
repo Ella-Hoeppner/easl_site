@@ -14,6 +14,7 @@ pub mod docs;
 pub mod error;
 pub mod examples;
 pub mod mail;
+pub mod moderation;
 pub mod pages;
 pub mod playlists;
 pub mod ratelimit;
