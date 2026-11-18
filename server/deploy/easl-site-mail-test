@@ -1,0 +1,29 @@
+#!/bin/sh
+# Sends a test email with the editor server's email settings (SMTP_URL and
+# MAIL_FROM in /etc/easl-site.env), to check them without the server.
+# Installed as /usr/local/sbin/easl-site-mail-test; run as root:
+#   easl-site-mail-test you@example.com
+set -eu
+to="${1:?usage: easl-site-mail-test <address>}"
+env="${EASL_SITE_ENV:-/etc/easl-site.env}"
+setting() { sed -n "s/^$1=//p" "$env" | tail -n 1; }
+url="$(setting SMTP_URL)"
+from="$(setting MAIL_FROM)"
+if [ -z "$url" ] || [ -z "$from" ]; then
+  echo "SMTP_URL and MAIL_FROM must both be set in $env" >&2
+  exit 1
+fi
+case "$url" in
+  *REPLACE_WITH*) echo "SMTP_URL in $env still has its placeholder" >&2; exit 1 ;;
+esac
+# The envelope sender is MAIL_FROM's address, without its display name.
+sender="$(printf '%s' "$from" | sed -n 's/.*<\(.*\)>.*/\1/p')"
+[ -n "$sender" ] || sender="$from"
+
+message="$(mktemp)"
+trap 'rm -f "$message"' EXIT
+printf 'From: %s\r\nTo: %s\r\nSubject: easl editor: test email\r\nDate: %s\r\nMessage-ID: <test-%s@easl-lang.org>\r\n\r\nThis is a test of the easl editor'"'"'s email settings, sent from %s.\r\n' \
+  "$from" "$to" "$(date -R)" "$(date +%s).$$" "$(hostname)" >"$message"
+curl --silent --show-error --ssl-reqd --url "$url" \
+  --mail-from "$sender" --mail-rcpt "$to" --upload-file "$message"
+echo "sent a test email to $to"
