@@ -134,74 +134,23 @@ API (`/api`): `GET me`, `GET me/sketches`, `GET me/playlists`; `POST sketches`; 
 
 Two hostnames, one machine: Caddy serves `easl-lang.org` (the docs) from files, and reverse-proxies `editor.easl-lang.org` to this server. DNS needs a record for `editor` pointing at the same machine as the apex: an `A` (and `AAAA`, if the apex has one) record for `editor.easl-lang.org` with the same addresses, or a `CNAME` from `editor` to `easl-lang.org`. Caddy gets the new name's certificate by itself once the record resolves.
 
-Build on the server (or a matching Linux machine): `cargo build --release`, then install `target/release/easl-site-server` as `/usr/local/bin/easl-site-server`. The site goes where `deploy.sh` already puts it (`/srv/easl-site`); the database lives outside it, in `/var/lib/easl-site/` (owned by a dedicated `easl` user). Memory use is small (tens of MB, plus ~19 MB per concurrent password hash, at most two at once).
+The files for the machine are in `deploy/`: the service (`easl-site.service`), Caddy's config (`Caddyfile`), the backup job (see "Backups"), and `easl-site-mail-test`, which sends a test email with the server's settings. The repo's `deploy.sh` deploys through the `easl-site` SSH host: `./deploy.sh site` builds the docs from scratch and uploads them to `/srv/easl-site` (as the `deploy` user); `./deploy.sh server` uploads this directory's source to `~deploy/easl-site-server`, builds it there (`cargo build --release --locked`, a couple of minutes), installs `/usr/local/bin/easl-site-server`, and restarts the service if it's enabled; `./deploy.sh` does both, site first (the server syncs the examples from it when it starts). Templates and app assets are compiled into the binary, so the server is one file.
 
-`/etc/systemd/system/easl-site.service`:
+The machine (Ubuntu): Caddy from its apt repository; `build-essential`, `pkg-config`, `rsync`, and `sqlite3`; Rust (rustup's minimal profile) for the `deploy` user; a system user `easl` that owns the database in `/var/lib/easl-site/` (systemd makes the directory, `StateDirectory=easl-site`); and `ufw` allowing only SSH (22/tcp), HTTP (80/tcp), and HTTPS (443/tcp and udp), since the server listens on `127.0.0.1:8000` behind Caddy. Memory use is small (tens of MB, plus ~19 MB per concurrent password hash, at most two at once).
 
-```ini
-[Unit]
-Description=easl site server
-After=network.target
+`/etc/easl-site.env` (mode 600, root) holds the email settings, `SMTP_URL` and `MAIL_FROM`; email goes out through Resend (`SMTP_URL=smtps://resend:<API key>@smtp.resend.com:465`, `MAIL_FROM=easl <noreply@easl-lang.org>`), whose DNS records (DKIM, the `send` subdomain, and a `_dmarc` record) are in Cloudflare. `easl-site-mail-test you@example.com` checks them. `systemctl enable --now easl-site` starts the server; `journalctl -u easl-site` shows its logs. It shuts down cleanly on SIGTERM.
 
-[Service]
-User=easl
-Group=easl
-ExecStart=/usr/local/bin/easl-site-server serve \
-  --bind 127.0.0.1:8000 \
-  --site-dir /srv/easl-site \
-  --db /var/lib/easl-site/easl-site.db \
-  --editor-origin https://editor.easl-lang.org \
-  --docs-origin https://easl-lang.org \
-  --sync-examples-owner ella \
-  --trust-proxy
-EnvironmentFile=/etc/easl-site.env
-Restart=on-failure
-StateDirectory=easl-site
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/easl-site
-PrivateTmp=true
+Caddy (`deploy/Caddyfile`, installed as `/etc/caddy/Caddyfile`; `systemctl reload caddy` after changing it) serves the docs itself and proxies the editor host. The app sets its own cache headers (a year for `?v=` URLs, revalidation otherwise, `no-store` for pages that depend on the session); the docs keep Caddy's rules. On the docs host, Caddy hands the old playground and the app's paths (`@moved`) to the server, which answers them with its docs-host redirects (it maps `?example=<id>` to the example's sketch, so the mapping lives in one place). Caddy passes the original `Host` through, which is how the server tells the two hosts apart: requests proxied from the `easl-lang.org` block arrive as `Host: easl-lang.org` and get the docs host's redirects. Every name is "DNS only" in Cloudflare (not proxied): the server rate-limits by the client's address, which a proxy would replace with its own, and Caddy gets each name's certificate itself. (The app also compresses with gzip/brotli; Caddy leaves already-encoded responses alone.)
 
-[Install]
-WantedBy=multi-user.target
-```
+The examples: with `--sync-examples-owner ella`, each start syncs `editor/examples.json` into ella's sketches (and logs and carries on when ella doesn't exist yet). To sync by hand after a site deploy without restarting: `sudo -u easl easl-site-server sync-examples --db /var/lib/easl-site/easl-site.db --site-dir /srv/easl-site`. Whoever registers `ella` first owns the examples, so Ella signs up as soon as the editor is up.
 
-`/etc/easl-site.env` (mode 600) holds `SMTP_URL=…` and `MAIL_FROM=…`. Then `systemctl enable --now easl-site`; `journalctl -u easl-site` for logs. The server shuts down cleanly on SIGTERM.
+**Launching** (once; everything above is in place, with the new Caddy config staged as `/etc/caddy/Caddyfile.launch` and the service installed but not enabled):
 
-Caddy (`/etc/caddy/Caddyfile`) serves the docs itself and proxies the editor host. The app sets its own cache headers (a year for `?v=` URLs, revalidation otherwise, `no-store` for pages that depend on the session); the docs keep Caddy's rules. On the docs host, Caddy hands the old playground and the app's paths to the server, which answers them with its docs-host redirects (it maps `?example=<id>` to the example's sketch, so the mapping lives in one place):
-
-```
-easl-lang.org {
-  encode zstd gzip
-
-  # The old playground and the app's paths: the server redirects them to
-  # the editor host.
-  @moved path /playground /playground.html /explore /explore/* /new /s/* /u/* /p/* /playlists/* /login /signup /logout /forgot /reset/* /verify/* /settings /settings/* /admin /admin/* /api /api/*
-  handle @moved {
-    reverse_proxy 127.0.0.1:8000
-  }
-
-  handle {
-    root * /srv/easl-site
-    file_server
-    # (the existing Cache-Control rules for the docs stay here)
-  }
-}
-
-editor.easl-lang.org {
-  encode zstd gzip
-  reverse_proxy 127.0.0.1:8000
-}
-
-www.easl-lang.org {
-  redir https://easl-lang.org{uri} permanent
-}
-```
-
-Caddy passes the original `Host` through, which is how the server tells the two hosts apart: requests proxied from the `easl-lang.org` block arrive as `Host: easl-lang.org` and get the docs host's redirects. (The app also compresses with gzip/brotli; Caddy leaves already-encoded responses alone. Either can be dropped.)
-
-The examples: deploy the site first, then the server. With `--sync-examples-owner ella`, each start syncs `editor/examples.json` into ella's sketches (and logs and carries on when ella doesn't exist yet). To sync by hand after a site deploy without restarting: `sudo -u easl easl-site-server sync-examples --db /var/lib/easl-site/easl-site.db --site-dir /srv/easl-site`. **Create the `ella` account (sign up at the editor host) before announcing the site**: whoever registers `ella` first owns the examples.
+1. `./deploy.sh site`.
+2. On the machine: `cp /etc/caddy/Caddyfile.launch /etc/caddy/Caddyfile && systemctl reload caddy && systemctl enable --now easl-site`.
+3. Ella signs up as `ella` at `https://editor.easl-lang.org/signup` and follows the verification email.
+4. On the machine: `sudo -u easl easl-site-server admin grant ella --db /var/lib/easl-site/easl-site.db`, then `systemctl restart easl-site` to sync the examples into her account.
+5. Check: the examples open from the docs, signing up and verifying, saving and publishing a sketch, commenting, liking, reporting, and the moderation page; then `systemctl start easl-site-backup` and check the backup it made.
 
 ### Backups
 

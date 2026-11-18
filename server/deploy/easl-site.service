@@ -1,0 +1,26 @@
+[Unit]
+Description=easl site server
+After=network.target
+
+[Service]
+User=easl
+Group=easl
+ExecStart=/usr/local/bin/easl-site-server serve \
+  --bind 127.0.0.1:8000 \
+  --site-dir /srv/easl-site \
+  --db /var/lib/easl-site/easl-site.db \
+  --editor-origin https://editor.easl-lang.org \
+  --docs-origin https://easl-lang.org \
+  --sync-examples-owner ella \
+  --trust-proxy
+EnvironmentFile=/etc/easl-site.env
+Restart=on-failure
+StateDirectory=easl-site
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/easl-site
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,36 @@
+# easl-lang.org: the docs, static files that deploy.sh uploads into
+# /srv/easl-site, and the editor, the easl-site service on 127.0.0.1:8000
+# (see server/README.md, "Production"). Installed as /etc/caddy/Caddyfile.
+
+easl-lang.org {
+	encode zstd gzip
+
+	# The old playground and the app's paths: the server redirects them to
+	# the editor host.
+	@moved path /playground /playground.html /explore /explore/* /new /s/* /u/* /p/* /playlists/* /login /signup /logout /forgot /reset/* /verify/* /settings /settings/* /admin /admin/* /api /api/*
+	handle @moved {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		root * /srv/easl-site
+		file_server
+
+		# Browsers revalidate every file on each load (a cheap 304 when it
+		# hasn't changed), so a deploy shows up right away. Files asked for
+		# with their build's hash (?v=...) can be kept for good.
+		@versioned query v=*
+		@unversioned not query v=*
+		header @versioned Cache-Control "public, max-age=31536000, immutable"
+		header @unversioned Cache-Control "no-cache"
+	}
+}
+
+editor.easl-lang.org {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8000
+}
+
+www.easl-lang.org {
+	redir https://easl-lang.org{uri} permanent
+}
