@@ -126,14 +126,16 @@ async fn reload(
   Ok(row.detail(&state.db, viewer).await?)
 }
 
+/// Fails when the user has created (or forked) too many sketches in the
+/// last hour or day.
 fn check_create_limit(
   state: &AppState,
   user: &CurrentUser,
 ) -> Result<(), AppError> {
-  state.limiter.check(
+  state.limiter.check_all(
     Action::SketchCreate,
     &user.id.to_string(),
-    state.config.limits.sketch_creates,
+    &state.config.limits.sketch_creates,
   )
 }
 
@@ -168,7 +170,9 @@ pub async fn create(
       })?;
   }
   check_create_limit(&state, &user)?;
-  let id = sketches::create(&state.db, user.id, &sketch).await?;
+  state.disk.check()?;
+  let id = sketches::create(&state.db, user.id, &sketch, &state.config.history)
+    .await?;
   Ok((
     StatusCode::CREATED,
     Json(reload(&state, &id, &viewer).await?),
@@ -213,6 +217,7 @@ pub async fn update(
       entry_name: body.entry_name.unwrap_or(head.entry_name),
     };
     validate_contents(&contents)?;
+    state.disk.check()?;
     Some(contents)
   } else {
     None
@@ -231,7 +236,7 @@ pub async fn update(
     publish: false,
     tags: body.tags.as_deref().map(validate::tags).transpose()?,
   };
-  sketches::update(&state.db, &id, &update).await?;
+  sketches::update(&state.db, &id, &update, &state.config.history).await?;
   Ok(Json(reload(&state, &id, &viewer).await?))
 }
 
@@ -286,21 +291,14 @@ pub async fn fork(
       .take(MAX_TITLE_CHARS)
       .collect(),
   };
-  let files = match body.files {
-    Some(files) => files,
-    None => {
-      let mut conn = state.db.acquire().await?;
-      revisions::files(&mut conn, &id, source.shown_revision(&viewer)).await?
-    }
-  };
-  let (entry_file, entry_name) = source.shown_entry(&viewer);
+  let shown = source.shown_contents(&state.db, &viewer).await?;
   let sketch = NewSketch {
     title,
     description: String::new(),
     contents: Contents {
-      files,
-      entry_file: body.entry_file.unwrap_or(entry_file),
-      entry_name: body.entry_name.unwrap_or(entry_name),
+      files: body.files.unwrap_or(shown.files),
+      entry_file: body.entry_file.unwrap_or(shown.entry_file),
+      entry_name: body.entry_name.unwrap_or(shown.entry_name),
     },
     visibility: Visibility::Private,
     forked_from: Some(source.id.clone()),
@@ -308,7 +306,10 @@ pub async fn fork(
   };
   validate_contents(&sketch.contents)?;
   check_create_limit(&state, &user)?;
-  let new_id = sketches::create(&state.db, user.id, &sketch).await?;
+  state.disk.check()?;
+  let new_id =
+    sketches::create(&state.db, user.id, &sketch, &state.config.history)
+      .await?;
   Ok((
     StatusCode::CREATED,
     Json(reload(&state, &new_id, &viewer).await?),
@@ -389,6 +390,7 @@ pub async fn put_thumbnail(
   find_owned(&state, &id, &user).await?;
   let content_type = headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
   let mime = validate::thumbnail(content_type, &body)?;
+  state.disk.check()?;
   sketches::set_thumbnail(&state.db, &id, mime, &body).await?;
   Ok(StatusCode::NO_CONTENT)
 }

@@ -412,7 +412,7 @@ impl TokenPurpose {
 
 /// Creates an email link token for a user, returning the token.
 pub async fn create_email_token(
-  db: &SqlitePool,
+  db: impl SqliteExecutor<'_>,
   user_id: i64,
   purpose: TokenPurpose,
 ) -> sqlx::Result<String> {
@@ -427,6 +427,20 @@ pub async fn create_email_token(
   .bind(now() + purpose.lifetime())
   .execute(db)
   .await?;
+  Ok(token)
+}
+
+/// Creates a password-reset token for a user in place of any earlier
+/// ones, so only the newest reset link works. Returns the token.
+pub async fn replace_reset_token(
+  db: &SqlitePool,
+  user_id: i64,
+) -> sqlx::Result<String> {
+  let mut tx = db.begin().await?;
+  delete_email_tokens(&mut *tx, user_id, TokenPurpose::Reset).await?;
+  let token =
+    create_email_token(&mut *tx, user_id, TokenPurpose::Reset).await?;
+  tx.commit().await?;
   Ok(token)
 }
 

@@ -151,14 +151,12 @@ pub async fn by_login(
   }
 }
 
-/// Creates an account, failing with a conflict when the username or email
-/// is taken.
-pub async fn create(
+/// Fails with a conflict when the username or email is taken.
+pub async fn check_available(
   db: &SqlitePool,
   username: &str,
   email: &str,
-  password_hash: &str,
-) -> Result<User, AppError> {
+) -> Result<(), AppError> {
   if by_username(db, username).await?.is_some() {
     return Err(AppError::conflict("That username is taken."));
   }
@@ -167,6 +165,18 @@ pub async fn create(
       "An account with that email address already exists.",
     ));
   }
+  Ok(())
+}
+
+/// Creates an account, failing with a conflict when the username or email
+/// is taken.
+pub async fn create(
+  db: &SqlitePool,
+  username: &str,
+  email: &str,
+  password_hash: &str,
+) -> Result<User, AppError> {
+  check_available(db, username, email).await?;
   let result = sqlx::query_as(&format!(
     "INSERT INTO users (username, email, password_hash, created_at) \
      VALUES (?, ?, ?, ?) RETURNING {USER_COLUMNS}"

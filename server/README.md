@@ -34,6 +34,7 @@ Tests: `cargo test` (integration tests in `tests/` run the real router against a
 easl-site-server serve         [--bind 127.0.0.1:8000] [--site-dir ../site] [--db ./data/easl-site.db]
                                [--editor-origin http://editor.localhost:<port>] [--docs-origin http://localhost:<port>]
                                [--sync-examples-owner <username>] [--dev] [--trust-proxy]
+                               [--min-free-disk 2G]
 easl-site-server sync-examples [--owner ella] [--db …] [--site-dir …]
 easl-site-server seed          [--db …] [--site-dir …]
 easl-site-server admin grant|revoke <username> [--db …]
@@ -43,11 +44,12 @@ easl-site-server admin grant|revoke <username> [--db …]
 - `--docs-origin` is the docs' public origin (`https://easl-lang.org`), for the app pages' links to the docs. It defaults to `http://localhost:<bind port>`.
 - `--sync-examples-owner ella` runs the examples sync (below) at startup when that user exists, logging and carrying on otherwise (no such user, no `editor/examples.json`, a conflict), so each deploy of a rebuilt site keeps the examples current.
 - `--trust-proxy` takes the client address (for rate limiting) from the last hop of `X-Forwarded-For`, which Caddy appends. Only set it behind a proxy, or clients can pick their own address.
+- `--min-free-disk` (default `2G`; a number of bytes with an optional `K`/`M`/`G`/`T` unit, binary; `0` turns it off) is the free space the database's filesystem must keep: below it, the server refuses to store sketch content (see "Free disk").
 - `SMTP_URL` (e.g. `smtps://user:pass@smtp.example.com:465`) and `MAIL_FROM` (e.g. `easl <noreply@easl-lang.org>`) enable email. Without them, emails are logged, with a warning at startup outside dev.
 - `RUST_LOG` sets log levels (default `info,tower_http=info,sqlx=warn`).
-- The database is created and migrated (`migrations/`) on startup. Expired sessions and email tokens are deleted hourly.
+- The database is created and migrated (`migrations/`) on startup. Expired sessions and email tokens, and daily email counts older than 30 days, are deleted hourly.
 
-The editor pages read the editor build's versions from `<site-dir>/editor/manifest.json` (`{"version", "monaco_version"}`), and the docs' playground redirects read `<site-dir>/editor/examples.json`; both are re-read when the file changes, so a site rebuild needs no restart. Templates and app assets are compiled into the binary in release builds, so deploying the server means deploying one file.
+The editor pages read the editor build's versions from `<site-dir>/editor/manifest.json` (`{"version", "monaco_version"}`; the page loads Monaco from the site's `/editor/monaco/<monaco_version>/`), and the docs' playground redirects read `<site-dir>/editor/examples.json`; both are re-read when the file changes, so a site rebuild needs no restart. Templates and app assets are compiled into the binary in release builds, so deploying the server means deploying one file.
 
 ### The examples
 
@@ -64,10 +66,12 @@ The docs' example programs are ordinary public sketches owned by `ella` (Ella's 
 | `src/db.rs`, `migrations/` | the pool (WAL, foreign keys, 4 connections), ids, the schema |
 | `src/auth.rs` | passwords (argon2id), sessions, email tokens, the session middleware and `MaybeUser`/`ApiUser`/`PageUser` extractors |
 | `src/security.rs` | the CSRF check and client addresses |
-| `src/ratelimit.rs` | in-memory sliding-window limits |
+| `src/ratelimit.rs` | in-memory sliding-window limits (see "Limits") |
+| `src/outbox.rs` | sending email within the site's daily budget |
+| `src/disk.rs` | the free-disk guard |
 | `src/users.rs`, `sketches.rs`, `playlists.rs`, `comments.rs`, `reports.rs` | the data layer and the API's JSON shapes |
 | `src/moderation.rs` | admin actions and the moderation log, and the admin pages' lists |
-| `src/revisions.rs` | sketch revisions: every saved version of a sketch's program |
+| `src/revisions.rs` | sketch revisions: the saved versions of a sketch's program, and pruning them to the history budget |
 | `src/tags.rs` | sketch tags, and the most-used ones |
 | `src/visibility.rs` | who can see what (one rule, used everywhere) |
 | `src/api/` | `/api/…` handlers |
@@ -88,13 +92,23 @@ The docs' example programs are ordinary public sketches owned by `ella` (Ella's 
 
 ### Drafts and publishing
 
-A sketch's program (its files and entry point) lives in its **revisions** (`sketch_revisions`, `revision_files`), numbered from 1 per sketch and kept forever. Each save of different files or a different entry point (`PUT /api/sketches/<id>` with `files`, `entry_file`, or `entry_name`) stores the whole program as a new revision numbered after the highest so far and makes it the sketch's **head**; a save identical to the head stores nothing. Title, description, and tags aren’t versioned.
+A sketch's program (its files and entry point) lives in its **revisions** (`sketch_revisions`, `revision_files`), numbered from 1 per sketch and kept within the sketch's history budget (below). Each save of different files or a different entry point (`PUT /api/sketches/<id>` with `files`, `entry_file`, or `entry_name`) stores the whole program as a new revision numbered after the highest so far and makes it the sketch's **head**; a save identical to the head stores nothing. Title, description, and tags aren’t versioned.
 
-While a sketch is unlisted or public it also has a **published** revision, which is what everyone but its owner sees (`GET /api/sketches/<id>`, the editor's `page_json.sketch`, forks, listings' entry points); its owner sees the head. A private sketch has no published revision (an admin looking at one sees its head). Changing the visibility from private to unlisted or public publishes the head; between unlisted and public the published revision stays; making it private unpublishes it. Saving to an unlisted or public sketch moves only the head, so it **has a draft** while the head differs from the published revision. `POST …/publish` makes the head published (400 for a private sketch); `POST …/discard-draft` moves the head back to the published revision (400 without a draft), keeping the discarded revisions in the history.
+While a sketch is unlisted or public it also has a **published** revision, which is what everyone but its owner sees (`GET /api/sketches/<id>`, the editor's `page_json.sketch`, forks, listings' entry points); its owner sees the head. A private sketch has no published revision (an admin looking at one sees its head). Changing the visibility from private to unlisted or public publishes the head; between unlisted and public the published revision stays; making it private unpublishes it. Saving to an unlisted or public sketch moves only the head, so it **has a draft** while the head differs from the published revision. `POST …/publish` makes the head published (400 for a private sketch); `POST …/discard-draft` moves the head back to the published revision (400 without a draft), keeping the discarded revisions in the history (until pruned).
 
 The sketch JSON carries `head_revision`, `published_revision` (or null), `has_draft` (false for anyone but the owner), `draft_saved_at` (when the head was saved, for the owner; null for others), and `published_updated_at` (when the published revision last changed). `updated_at` is the last change of any kind and `published_at` when the sketch first became public. Others see a profile's sketches ordered by `published_updated_at`, so saving a draft doesn't move a card for them; the owner's own profile orders by `updated_at`. Explore's "new" stays ordered by `published_at`.
 
 The migration (`0002_revisions.sql`) turned each existing sketch's files into its revision 1, published unless the sketch was private.
+
+### Revision history budget
+
+Each sketch's history has a size budget, 10 MB (`config::SKETCH_HISTORY_BYTES`), and each account's sketches' histories together have one of 5 MB while its email address is unverified (`config::UNVERIFIED_ACCOUNT_HISTORY_BYTES`) and 50 MB once it's verified (`config::VERIFIED_ACCOUNT_HISTORY_BYTES`); all three are `Config::history`. A revision's **size** (`revisions::size`, stored in `sketch_revisions.size`) is its files' paths and contents in bytes plus 64 bytes per file and 256 per revision for the rows holding them; each sketch keeps its revisions' total in `sketches.history_bytes`, maintained by triggers (like the like and comment counts), so a save checks both budgets without reading any files. Migration `0005_history_budget.sql` measured existing revisions the same way.
+
+- **Pruning:** a save that stores a new revision and takes the sketch's history past its budget deletes the sketch's oldest revisions (lowest numbers first), in the same transaction, until it fits. It never deletes the head or the published revision, so a sketch can go over its budget only by those two (at most 2 MB, since a save holds at most 1 MB). A short program keeps thousands of versions; one near the 1 MB limit keeps about ten.
+- **The account budget:** when, even after that pruning, a save or a new sketch (including a fork) would take the owner's total past their budget, nothing is saved (pruning included) and the request fails with 413: "… would take the saved versions of all your sketches past 50 MB, the most an account can keep. Delete sketches you no longer need to make room. …", or, for an unverified account, "… past 5 MB, the most an account can keep until its email address is verified. Verify your email address to raise the limit to 50 MB, or delete sketches you no longer need to make room." A save that doesn't grow the total (pruning freed as much as it added) is allowed even over the budget. Unverified accounts get little because they're cheap to make (5 sign-ups an hour per address); verifying takes an email, and the site sends at most 80 a day, so verified accounts can't be made in bulk. An account whose email changes is unverified again, with the smaller budget, until it verifies the new address.
+- **Numbering:** a new revision is numbered after the highest so far. The highest is never pruned (pruning happens only when it's saved, and then it's the head), so numbers are never reused. `GET …/revisions` lists what's left, so numbers can have gaps.
+- **Reading:** everything that reads a sketch's head or published revision (the sketch JSON, `GET …/published`, forks, a save's merge with the head) reads the sketch row and the revision in one transaction, rereading the row when a concurrent save has pruned the revision it named.
+- The examples sync and `seed` use the default budgets.
 
 ### Tags
 
@@ -122,13 +136,40 @@ Every list but the open reports pages by 50. Usernames on the admin pages link t
 
 **A user's moderation page**, `/admin/users/<username>` (`?list=submitted|against|actions|comments&page=`), is the "moderator mode" view of an account, kept apart from the profile so admins browsing the site see what everyone sees: under a "Moderation view" banner, the account's facts (its **email address**, as a `mailto:` link so moderators can follow up by email, whether it's verified, when it joined, admin status, and ban status with who banned it and a Ban/Unban button, which admins' pages don't offer), its sketch count with how many are hidden or private, its comment and deleted-comment counts, the reports it submitted and the reports against it (of the user, their sketches, or their comments), each with its status, the log entries involving it, and its deleted comments. The overview shows the newest 10 of each list with a "Show all" link to that list alone, paged by 50. Profiles show admins a small shield icon beside the name linking there, and the Reports tab links each reporter's and reported user's page. Email addresses appear nowhere else (no other page and no API response shows anyone's).
 
+### Limits
+
+**Rate limits** (`config::RateLimits`, in memory, `src/ratelimit.rs`). Each is its own bucket, so hitting one never blocks another action; an action with two limits (hourly and daily) is refused when either is reached, and a refused attempt counts against neither. Exceeding one is a 429 ("Too many requests…", on the page's form for page routes).
+
+| What | Per | Limit |
+|---|---|---|
+| Sign-in attempts and password-reset form submissions | address | 10 per 10 minutes |
+| Sign-ups (each sends a verification email) | address | 5 per hour, counting attempts that pass validation and name a free username and email |
+| Password-reset requests (`/forgot`) | address | 10 per hour |
+| Password-reset emails | recipient account | 3 per hour and 6 per day; silent (see below) |
+| Verification emails after sign-up (`/settings/verification`, and changing the email) | account | 3 per hour and 10 per day |
+| Current-password checks in settings (`/settings/email`, `/settings/password`, `/settings/delete`) | account | 10 per 10 minutes, checked before hashing |
+| Sketches created, including forks | account | 30 per hour and 100 per day |
+| Playlists created (API and form) | account | 20 per hour |
+| Comments | account | 10 per minute |
+| Reports | account | 10 per hour |
+
+**Email.** Resend's free tier sends 100 emails a day, so the site sends at most 80 a day (`config::DAILY_EMAIL_BUDGET`, `Config::daily_email_budget`; UTC days), leaving room for test emails. Every email goes through `outbox::send`, which counts it in the database (`email_days`, one row per day), so a restart doesn't reset the count; with the day's budget spent it sends nothing, logs a warning, and the user sees "We can't send email right now. Please try again later." (503):
+
+- **Sign-up** still creates the account and signs in, and the page says the verification email couldn't be sent and can be sent from settings later.
+- **Resending verification** shows the message in the email section; **changing the email** is refused with it before the address changes.
+- **`/forgot`** shows it for every address, with or without an account, so it reveals nothing about which addresses have accounts. When the recipient's own reset limit is reached, it shows the usual "If an account uses …, we've sent it a link" page and sends nothing, exactly as for an unknown address.
+
+**Free disk.** The last backstop (`src/disk.rs`): before storing sketch content or a thumbnail (`POST /api/sketches`, a fork, a `PUT` that saves files or the entry point, `PUT …/thumbnail`), the server checks the free space on the database's filesystem (`statvfs`, through the `fs4` crate, measured at most every 5 seconds) and refuses with 507 "The site is out of storage right now, so it can't save sketches or thumbnails. Your work hasn't been saved; please try again later." while it's below `--min-free-disk` (2 GB; `Config::min_free_disk`, measured on `Config::data_dir`). Each measurement below the threshold logs a warning, so a full disk shows in the log every few seconds while it lasts. Everything else (reading, title and visibility changes, comments, sign-ins) keeps working. When the space can't be measured, it logs the error and lets writes through. The budgets bound each account; this bounds them all together.
+
+**Password-reset links.** Only the newest works: asking for a reset deletes the account's earlier reset tokens. Changing the password in settings deletes them too, in the transaction that changes the hash (and ends the other sessions), as using a reset link and changing the email already did.
+
 ### Routes
 
 On the editor host — pages: `/` (explore: `?sort=new|popular|trending&q=&tag=&page=`; `/explore` redirects there with its query), `/u/<username>` (`?tab=sketches|playlists|likes&page=`), `/u/<username>/avatar.svg`, `/p/<id>`, `/playlists/new` (the form; it posts back to itself and goes to the new playlist), `/s/<id>` (`?playlist=`), `/s/<id>/thumb`, `/new`, `/login`, `/signup`, `POST /logout`, `/forgot`, `/reset/<token>`, `/verify/<token>`, `/settings` (forms post to `/settings/profile|email|password|verification|delete`), `/admin` (`?tab=reports|banned|hidden|comments|log&resolved=1&page=`), `/admin/users/<username>` (`?list=submitted|against|actions|comments&page=`). Files: `/static/…` (the app's assets), and from the site directory only `/editor/…` and `/easl-web/…` (`?v=` URLs cached for a year, others revalidated). Anything else is a 404.
 
 On the docs host: `/playground` and `/playground.html` redirect (308) to `<editor-origin>/s/<sketch id>` for a known `?example=<id>`, else to `<editor-origin>/new`; paths whose first segment is one of the app's (`explore`, `new`, `s`, `u`, `p`, `playlists`, `login`, `signup`, `logout`, `forgot`, `reset`, `verify`, `settings`, `admin`, `api`) redirect (308) to the same path and query on the editor host. Everything else is the static site.
 
-API (`/api`): `GET me`, `GET me/sketches`, `GET me/playlists`; `POST sketches`; `GET|PUT|DELETE sketches/<id>` (`PUT` takes any of `title`, `description`, `files`, `entry_file`, `entry_name`, `visibility`, `tags`); `POST sketches/<id>/publish`, `POST sketches/<id>/discard-draft` (owner); `GET sketches/<id>/published` (`{revision, files, entry_file, entry_name, published_at}`, 404 when nothing is published); `GET sketches/<id>/revisions` (owner; `{revisions: [{number, created_at, published, head}]}`, newest first); `POST sketches/<id>/fork`; `PUT sketches/<id>/thumbnail`; `POST|DELETE sketches/<id>/like`; `GET|POST sketches/<id>/comments`; `DELETE comments/<id>`; `POST playlists`; `GET|PUT|DELETE playlists/<id>`; `POST playlists/<id>/items`; `DELETE playlists/<id>/items/<sketch_id>`; `PUT playlists/<id>/order`; `POST reports`; `POST admin/sketches/<id>/hide|unhide`, `admin/users/<username>/ban|unban`, `admin/reports/<id>/resolve`, `admin/comments/<id>/restore`. Errors are `{"error": "…"}` with 400/401/403/404/409/413/429.
+API (`/api`): `GET me`, `GET me/sketches`, `GET me/playlists`; `POST sketches`; `GET|PUT|DELETE sketches/<id>` (`PUT` takes any of `title`, `description`, `files`, `entry_file`, `entry_name`, `visibility`, `tags`); `POST sketches/<id>/publish`, `POST sketches/<id>/discard-draft` (owner); `GET sketches/<id>/published` (`{revision, files, entry_file, entry_name, published_at}`, 404 when nothing is published); `GET sketches/<id>/revisions` (owner; `{revisions: [{number, created_at, published, head}]}`, newest first); `POST sketches/<id>/fork`; `PUT sketches/<id>/thumbnail`; `POST|DELETE sketches/<id>/like`; `GET|POST sketches/<id>/comments`; `DELETE comments/<id>`; `POST playlists`; `GET|PUT|DELETE playlists/<id>`; `POST playlists/<id>/items`; `DELETE playlists/<id>/items/<sketch_id>`; `PUT playlists/<id>/order`; `POST reports`; `POST admin/sketches/<id>/hide|unhide`, `admin/users/<username>/ban|unban`, `admin/reports/<id>/resolve`, `admin/comments/<id>/restore`. Errors are `{"error": "…"}` with 400/401/403/404/409/413/429/503/507.
 
 ## Production
 
@@ -195,9 +236,18 @@ For a copy off the machine, [Litestream](https://litestream.io) can replicate th
 - **`head_revision` and `published_revision` are the real pointers for everyone**, so a viewer comparing them can tell an unpublished draft exists (as `updated_at` already shows when the owner last saved); only `has_draft` and `draft_saved_at` are owner-only.
 - **Listings break `updated_at` ties by insertion order** (newest first), not by id, so two sketches saved in the same second list in the order they were made.
 - **Sessions are host-only** on the editor host (no `Domain`), so the docs never see the cookie.
-- **Pages other than the editor send a strict Content-Security-Policy** (same-origin scripts, styles, images; no framing by other sites). The editor loads Monaco from jsdelivr, so it gets none; worth adding one tailored to it.
+- **Every page sends a Content-Security-Policy** (`src/pages/mod.rs`): same-origin scripts, styles, and images, no plugins, no framing by other sites. The editor pages' (`EDITOR_CSP`) adds what the editor needs: `'wasm-unsafe-eval'` in `script-src` (WebAssembly, for a browser that applies the page's policy to the analysis worker), `'unsafe-inline'` in `style-src` (Monaco writes `<style>` elements and `style` attributes), and `data:` images (in Monaco's stylesheet); everything it loads, Monaco included, is on its own origin. The iframe a program runs in (`/editor/runner.html`, a static file) sets its own policy in a `<meta>` element (same-origin scripts and styles plus `'wasm-unsafe-eval'` for the runtime and its audio worklet). Static files, workers' scripts included, get no CSP header: a worker started from a same-origin script runs under its own response's policy, so Monaco's worker and the analysis worker run unrestricted.
 - **Thumbnails** of non-private sketches are cached publicly for a year under their `?v=` URL; private ones only by the viewer's browser. A sketch made private later can linger in a shared cache under its old URL (no CDN today, so moot for now).
-- **Rate limits are in memory**, so they reset on restart, and they assume one server process.
+- **Rate limits are in memory**, so they reset on restart, and they assume one server process. The daily email budget is the exception: it's counted in the database, as the backstop behind them.
+- **History is budgeted by size, not by count or age** (see "Revision history budget"): what fills a disk is bytes, and counting them lets small programs keep long histories. Sizes are approximate (bytes of paths and contents plus a fixed overhead per row), which is all the budget needs.
+- **The head and published revision are never pruned**, even when they alone exceed the sketch's budget (only possible with a budget under 2 MB).
+- **Account budgets depend on verification** (5 MB unverified, 50 MB verified) rather than being one figure: what limits how much one person can store is how many accounts they can make, and only verified ones are bounded (by the daily email budget). At 5 sign-ups an hour per address, unverified accounts add at most 25 MB an hour per address, which the free-disk guard backs up.
+- **The free-disk guard fails open** when the space can't be measured (logging the error), since refusing every save over a measuring problem would be worse than the risk it guards against.
+- **A save past the account budget is refused, not pruned across sketches**: pruning another sketch's history to make room would silently lose versions of work the user isn't looking at.
+- **Signing up with the day's email budget spent still creates the account** (unverified, so it can't publish, comment, like, or report until verified), rather than refusing a sign-up for a reason the user can't fix.
+- **The sign-up limit counts only sign-ups that could succeed**: mistakes in the form, and taken usernames or emails, are reported before it's checked, so they don't lock out the address.
+- **A changed email address's verification email counts against the account's verification limit**, since changing the address repeatedly would otherwise send unlimited email to addresses of the account's choosing.
+- **The reset-email limit is per recipient account and silent**: past it, `/forgot` answers as for an unknown address, so a stranger can't flood someone's inbox or learn they have an account.
 - **Tags are free-form**, with no curated list or moderation beyond hiding a sketch; the tag row shows whatever listed sketches use most.
 - **`seed` tags the examples that have no tags** each time it runs (so an existing database gets them too), and tags the other demo users' sketches when it makes them; on a database seeded before tags existed, those stay untagged.
 - **Templates are embedded with `include_str!`** (one list in `src/templates.rs`; a template missing from it fails every test that renders it), and dev mode reads from `CARGO_MANIFEST_DIR`, so `--dev` is meant for `cargo run` in this directory.

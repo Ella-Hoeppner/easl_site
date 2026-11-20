@@ -40,10 +40,15 @@ pub fn relaxed_limits() -> RateLimits {
   let generous = Limit::new(10_000, 3600);
   RateLimits {
     auth: generous,
+    signups: generous,
+    reset_requests: generous,
+    reset_emails: [generous; 2],
+    verification_emails: [generous; 2],
+    password_checks: generous,
     comments: generous,
-    sketch_creates: generous,
+    sketch_creates: [generous; 2],
+    playlist_creates: generous,
     reports: generous,
-    verification_emails: generous,
   }
 }
 
@@ -89,6 +94,11 @@ impl TestApp {
     .expect("manifest");
     let mut config = Config::new(site, ORIGIN, DOCS_ORIGIN, false);
     config.limits = relaxed_limits();
+    config.daily_email_budget = 10_000;
+    // The free-disk guard is off unless a test sets a threshold, so the
+    // tests pass on a nearly full disk.
+    config.data_dir = dir.path().to_path_buf();
+    config.min_free_disk = 0;
     adjust(&mut config);
     let pool = db::open(&database_path(&dir)).await.expect("db");
     let (mailer, mail) = Mailer::capture();
@@ -99,6 +109,15 @@ impl TestApp {
       mail,
       _dir: dir,
     }
+  }
+
+  /// The app restarted: a new server's state (its in-memory rate limits,
+  /// an empty mail capture) over the same database and site directory,
+  /// with `adjust` applied to the configuration again.
+  pub async fn restart(self, adjust: impl FnOnce(&mut Config)) -> Self {
+    self.state.db.close().await;
+    let TestApp { _dir, .. } = self;
+    Self::build(_dir, adjust).await
   }
 
   /// Where the app's database lives.

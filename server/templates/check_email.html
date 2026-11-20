@@ -3,11 +3,16 @@
 {% block page_class %} narrow{% endblock %}
 {% block content %}
 <section class="panel">
+  {% if unsent %}
+  <h1>Your account is ready</h1>
+  <p>We can’t send email right now, so we couldn’t send a verification link to <strong>{{ email }}</strong>. Please try again later: you can send it from your settings. Until then you can make and save sketches, but not publish them.</p>
+  {% else %}
   <h1>Check your email</h1>
   {% if purpose == "reset" %}
   <p>If an account uses <strong>{{ email }}</strong>, we’ve sent it a link to reset the password. The link works for one hour.</p>
   {% else %}
   <p>We’ve sent a verification link to <strong>{{ email }}</strong>. Open it to publish sketches and playlists, comment, and report. The link works for 48 hours.</p>
+  {% endif %}
   {% endif %}
   {% if dev_link %}
   <div class="dev-banner">

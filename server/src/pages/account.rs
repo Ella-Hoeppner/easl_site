@@ -1,4 +1,10 @@
 //! Signing up, in, and out; email verification; password resets.
+//!
+//! Every email goes out through [`outbox::send`], within the site's daily
+//! budget, behind per-address limits on sign-ups and reset requests and a
+//! per-account limit on reset emails. `/forgot` answers the same whether or
+//! not the address has an account, and whether or not that account's limit
+//! held its email back.
 
 use axum::Form;
 use axum::extract::{Path, Query, State};
@@ -12,10 +18,11 @@ use super::{PageContext, render_page, render_status, see_other};
 use crate::auth::{
   self, CurrentUser, TokenPurpose, clear_session_cookie, consume_email_token,
   create_email_token, create_session, delete_email_tokens,
-  delete_other_sessions, peek_email_token, session_cookie,
+  delete_other_sessions, peek_email_token, replace_reset_token, session_cookie,
 };
 use crate::error::{AppError, PageError, PageResult};
 use crate::mail::{reset_email, verification_email};
+use crate::outbox;
 use crate::ratelimit::Action;
 use crate::security::ClientIp;
 use crate::state::AppState;
@@ -43,7 +50,8 @@ fn check_auth_limit(state: &AppState, ip: &ClientIp) -> Result<(), AppError> {
 }
 
 /// Sends a verification email for the user's current address, returning
-/// the link (shown on the page in dev).
+/// the link (shown on the page in dev); fails with
+/// [`AppError::email_unavailable`] when the day's email budget is spent.
 pub async fn send_verification(
   state: &AppState,
   user: &User,
@@ -51,9 +59,11 @@ pub async fn send_verification(
   let token =
     create_email_token(&state.db, user.id, TokenPurpose::Verify).await?;
   let link = state.config.editor_url(&format!("/verify/{token}"));
-  state
-    .mailer
-    .send(verification_email(&user.email, &user.username, &link));
+  outbox::send(
+    state,
+    verification_email(&user.email, &user.username, &link),
+  )
+  .await?;
   Ok(link)
 }
 
@@ -148,7 +158,9 @@ pub struct SignupForm {
 }
 
 /// `POST /signup`: creates the account, signs in, and sends the
-/// verification email.
+/// verification email (or says it can't, when the day's email budget is
+/// spent; the account works anyway, and the email can be re-sent from
+/// settings).
 pub async fn signup(
   State(state): State<AppState>,
   page: PageContext,
@@ -157,7 +169,7 @@ pub async fn signup(
 ) -> PageResult {
   let next = validate::next_path(form.next.as_deref());
   match create_account(&state, &ip, &form).await {
-    Ok((user, token, link)) => {
+    Ok((user, token, sent)) => {
       let signed_in = PageContext {
         user: Some(CurrentUser {
           user: user.clone(),
@@ -172,9 +184,10 @@ pub async fn signup(
         context! {
           hide_verify_banner => true,
           purpose => "verify",
+          unsent => sent.is_none(),
           email => &user.email,
           next => &next,
-          dev_link => state.config.dev.then_some(link),
+          dev_link => sent.filter(|_| state.config.dev),
         },
       )?;
       response
@@ -198,20 +211,32 @@ pub async fn signup(
 }
 
 /// Validates a sign-up, creates the user and a session, and sends the
-/// verification email. Returns the user, session token, and link.
+/// verification email. Returns the user, session token, and link, or no
+/// link when the day's email budget is spent.
+///
+/// The address's sign-up limit counts sign-ups that get as far as hashing
+/// the password, so mistakes in the form (a taken username, say) don't use
+/// it up.
 async fn create_account(
   state: &AppState,
   ip: &ClientIp,
   form: &SignupForm,
-) -> Result<(User, String, String), AppError> {
-  check_auth_limit(state, ip)?;
+) -> Result<(User, String, Option<String>), AppError> {
   let username = validate::username(&form.username)?;
   let email = validate::email(&form.email)?;
   let password = validate::password(&form.password)?;
+  users::check_available(&state.db, &username, &email).await?;
+  state
+    .limiter
+    .check(Action::Signup, &ip.0, state.config.limits.signups)?;
   let hash = auth::hash_password(state, password).await?;
   let user = users::create(&state.db, &username, &email, &hash).await?;
   let token = create_session(&state.db, user.id).await?;
-  let link = send_verification(state, &user).await?;
+  let link = match send_verification(state, &user).await {
+    Ok(link) => Some(link),
+    Err(AppError::Unavailable(_)) => None,
+    Err(error) => return Err(error),
+  };
   Ok((user, token, link))
 }
 
@@ -284,33 +309,54 @@ pub struct ForgotForm {
   email: String,
 }
 
-/// `POST /forgot`: emails a reset link if an account has the address; the
-/// response is the same either way.
+/// `POST /forgot`: emails a reset link if an account has the address and
+/// its reset-email limit allows; the response is the same either way. When
+/// the day's email budget is spent, it says it can't send email right now,
+/// whatever the address.
 pub async fn forgot(
   State(state): State<AppState>,
   page: PageContext,
   ip: ClientIp,
   Form(form): Form<ForgotForm>,
 ) -> PageResult {
-  if let Err(error) = check_auth_limit(&state, &ip) {
-    return render_status(
+  let email = form.email.trim();
+  let fail = |error: AppError| {
+    render_status(
       &state,
       &page,
       error.status(),
       "forgot.html",
-      context! { email => &form.email, error => error.message() },
-    );
+      context! { email => email, error => error.message() },
+    )
+  };
+  if let Err(error) = state.limiter.check(
+    Action::ResetRequest,
+    &ip.0,
+    state.config.limits.reset_requests,
+  ) {
+    return fail(error);
+  }
+  if !outbox::has_room(&state).await? {
+    tracing::warn!("not sending a password reset: the email budget is spent");
+    return fail(AppError::email_unavailable());
   }
   let mut link = None;
-  if let Some(user) = users::by_email(&state.db, form.email.trim()).await?
+  if let Some(user) = users::by_email(&state.db, email).await?
     && user.banned_at.is_none()
+    && state.limiter.allow_all(
+      Action::ResetEmail,
+      &user.id.to_string(),
+      &state.config.limits.reset_emails,
+    )
   {
-    let token =
-      create_email_token(&state.db, user.id, TokenPurpose::Reset).await?;
+    let token = replace_reset_token(&state.db, user.id).await?;
     let url = state.config.editor_url(&format!("/reset/{token}"));
-    state
-      .mailer
-      .send(reset_email(&user.email, &user.username, &url));
+    let sent =
+      outbox::send(&state, reset_email(&user.email, &user.username, &url))
+        .await;
+    if let Err(error) = sent {
+      return fail(error);
+    }
     link = Some(url);
   }
   render_page(
@@ -320,7 +366,7 @@ pub async fn forgot(
     context! {
       hide_verify_banner => true,
       purpose => "reset",
-      email => form.email.trim(),
+      email => email,
       dev_link => if state.config.dev { link } else { None },
     },
   )

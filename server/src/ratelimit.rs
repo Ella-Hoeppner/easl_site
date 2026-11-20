@@ -1,8 +1,10 @@
 //! In-memory sliding-window rate limiting.
 //!
 //! Each (action, key) pair keeps the times of its recent events; an event is
-//! allowed when fewer than the limit's count fall inside its window. State
-//! lives in this process only, which suits a single-server deployment.
+//! allowed when, for each of the action's limits, fewer than the limit's
+//! count fall inside its window (so an action can have an hourly and a daily
+//! limit). State lives in this process only, which suits a single-server
+//! deployment.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
@@ -15,11 +17,22 @@ use crate::error::AppError;
 /// share a key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Action {
+  /// Signing in, or submitting a password-reset form, by client address.
   Auth,
+  /// Signing up, by client address.
+  Signup,
+  /// Asking for a password-reset email, by client address.
+  ResetRequest,
+  /// A password-reset email, by recipient account.
+  ResetEmail,
+  /// A verification email after sign-up, by account.
+  VerificationEmail,
+  /// Checking the current password in settings, by account.
+  PasswordCheck,
   Comment,
   SketchCreate,
+  PlaylistCreate,
   Report,
-  VerificationEmail,
   /// A sketch view, counted once per viewer and sketch per window.
   View,
 }
@@ -54,6 +67,13 @@ impl RateLimiter {
   /// Records an event for `(action, key)` if `limit` allows it, returning
   /// whether it did.
   pub fn allow(&self, action: Action, key: &str, limit: Limit) -> bool {
+    self.allow_all(action, key, &[limit])
+  }
+
+  /// Records an event for `(action, key)` if every one of `limits` allows
+  /// it, returning whether it did. An event refused by one limit counts
+  /// against none.
+  pub fn allow_all(&self, action: Action, key: &str, limits: &[Limit]) -> bool {
     let now = Instant::now();
     let Ok(mut state) = self.state.lock() else {
       // A poisoned lock means a panic elsewhere; failing open keeps the
@@ -64,22 +84,37 @@ impl RateLimiter {
     if state.checks.is_multiple_of(SWEEP_INTERVAL) {
       sweep(&mut state.windows, now);
     }
+    let longest = limits
+      .iter()
+      .map(|limit| limit.window)
+      .max()
+      .unwrap_or_default();
     let window = state
       .windows
       .entry((action, key.to_string()))
       .or_insert_with(|| Window {
         events: VecDeque::new(),
-        length: limit.window,
+        length: longest,
       });
-    window.length = limit.window;
+    window.length = longest;
     let events = &mut window.events;
     while events
       .front()
-      .is_some_and(|&t| now.duration_since(t) >= limit.window)
+      .is_some_and(|&t| now.duration_since(t) >= longest)
     {
       events.pop_front();
     }
-    if events.len() >= limit.count {
+    let within = |length: Duration| {
+      events
+        .iter()
+        .rev()
+        .take_while(|&&t| now.duration_since(t) < length)
+        .count()
+    };
+    if limits
+      .iter()
+      .any(|limit| within(limit.window) >= limit.count)
+    {
       return false;
     }
     events.push_back(now);
@@ -93,7 +128,18 @@ impl RateLimiter {
     key: &str,
     limit: Limit,
   ) -> Result<(), AppError> {
-    if self.allow(action, key, limit) {
+    self.check_all(action, key, &[limit])
+  }
+
+  /// Like [`RateLimiter::allow_all`], failing with
+  /// [`AppError::RateLimited`].
+  pub fn check_all(
+    &self,
+    action: Action,
+    key: &str,
+    limits: &[Limit],
+  ) -> Result<(), AppError> {
+    if self.allow_all(action, key, limits) {
       Ok(())
     } else {
       Err(AppError::RateLimited)
@@ -124,6 +170,27 @@ mod tests {
     assert!(!limiter.allow(Action::Auth, "a", limit));
     assert!(limiter.allow(Action::Auth, "b", limit));
     assert!(limiter.allow(Action::Comment, "a", limit));
+  }
+
+  #[test]
+  fn every_limit_applies() {
+    let limiter = RateLimiter::new();
+    let limits = [Limit::new(2, 0), Limit::new(3, 60)];
+    // The first limit's window is empty, so only the second one binds.
+    for _ in 0..3 {
+      assert!(limiter.allow_all(Action::ResetEmail, "a", &limits));
+    }
+    assert!(!limiter.allow_all(Action::ResetEmail, "a", &limits));
+    let limits = [Limit::new(1, 60), Limit::new(5, 3600)];
+    assert!(limiter.allow_all(Action::SketchCreate, "a", &limits));
+    assert!(!limiter.allow_all(Action::SketchCreate, "a", &limits));
+    // A refused event counts against neither limit.
+    let limits = [Limit::new(5, 60), Limit::new(1, 3600)];
+    assert!(limiter.allow_all(Action::Signup, "a", &limits));
+    for _ in 0..3 {
+      assert!(!limiter.allow_all(Action::Signup, "a", &limits));
+    }
+    assert!(limiter.allow_all(Action::Signup, "a", &[Limit::new(2, 60)]));
   }
 
   #[test]

@@ -22,6 +22,7 @@ mod highlight;
 mod landing;
 mod live_preview;
 mod nested_build;
+mod npm;
 mod editor;
 
 /// One page of the site, in nav order.
@@ -85,6 +86,9 @@ fn main() {
   let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
   let pages_dir = manifest_dir.join("../pages");
   let site_dir = manifest_dir.join("../site");
+  // The editor's JavaScript libraries, before the long builds, so a missing
+  // one fails the build at once.
+  npm::ensure_installed(&manifest_dir);
 
   let mut rendered: Vec<RenderedPage> = Vec::new();
   let mut fn_entries: Vec<FnEntry> = Vec::new();

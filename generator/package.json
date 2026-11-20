@@ -1,0 +1,8 @@
+{
+  "name": "easl-site-editor-deps",
+  "private": true,
+  "description": "The editor's JavaScript libraries, which the generator copies into the site (see editor.rs, MONACO_DIR).",
+  "dependencies": {
+    "monaco-editor": "0.52.2"
+  }
+}

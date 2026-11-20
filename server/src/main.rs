@@ -19,11 +19,12 @@ use tracing_subscriber::EnvFilter;
 
 use easl_site_server::app;
 use easl_site_server::auth;
-use easl_site_server::config::Config;
+use easl_site_server::config::{Config, parse_size};
 use easl_site_server::db;
 use easl_site_server::examples;
 use easl_site_server::mail::Mailer;
 use easl_site_server::moderation;
+use easl_site_server::outbox;
 use easl_site_server::seed;
 use easl_site_server::site;
 use easl_site_server::state::AppState;
@@ -69,6 +70,11 @@ enum Command {
     /// user exists).
     #[arg(long)]
     sync_examples_owner: Option<String>,
+    /// Refuse to store sketch content or thumbnails while the database's
+    /// filesystem has less free space than this, e.g. 2G or 500M (0 turns
+    /// the check off).
+    #[arg(long, default_value = "2G", value_parser = parse_size)]
+    min_free_disk: u64,
   },
   /// Makes the site's examples (editor/examples.json) public sketches owned
   /// by a user, creating or updating them.
@@ -127,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
       dev,
       trust_proxy,
       sync_examples_owner,
+      min_free_disk,
     } => {
       let port = bind.port();
       let editor_origin = editor_origin
@@ -135,6 +142,11 @@ async fn main() -> anyhow::Result<()> {
         docs_origin.unwrap_or_else(|| format!("http://localhost:{port}"));
       let mut config = Config::new(site_dir, &editor_origin, &docs_origin, dev);
       config.trust_proxy = trust_proxy;
+      config.min_free_disk = min_free_disk;
+      config.data_dir = match db.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+      };
       serve(bind, &db, config, sync_examples_owner.as_deref()).await
     }
     Command::SyncExamples {
@@ -188,6 +200,9 @@ async fn serve(
       interval.tick().await;
       if let Err(error) = auth::delete_expired(&pool).await {
         tracing::error!("deleting expired sessions: {error}");
+      }
+      if let Err(error) = outbox::delete_old_counts(&pool).await {
+        tracing::error!("deleting old email counts: {error}");
       }
     }
   });

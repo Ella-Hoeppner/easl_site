@@ -9,6 +9,7 @@ use tokio::sync::Semaphore;
 use crate::assets::Assets;
 use crate::auth::hash_password_blocking;
 use crate::config::Config;
+use crate::disk::DiskGuard;
 use crate::mail::Mailer;
 use crate::ratelimit::RateLimiter;
 use crate::site::SiteFiles;
@@ -31,6 +32,8 @@ pub struct Shared {
   pub site: SiteFiles,
   pub mailer: Mailer,
   pub limiter: RateLimiter,
+  /// Refuses to store sketch content while the disk is low on space.
+  pub disk: DiskGuard,
   /// Bounds concurrent password hashing (each takes ~19 MB of memory).
   pub hashing: Semaphore,
   /// A hash of a random password, checked when a sign-in names no
@@ -54,6 +57,7 @@ impl AppState {
       site,
       mailer,
       limiter: RateLimiter::new(),
+      disk: DiskGuard::new(config.data_dir.clone(), config.min_free_disk),
       hashing: Semaphore::new(CONCURRENT_HASHES),
       dummy_password_hash: hash_password_blocking(&new_token())?,
       config,

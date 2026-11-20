@@ -7,10 +7,13 @@
 //! editor.html`) for saved sketches (`/s/<id>`) and new ones (`/new`). It
 //! runs each program with the web runtime in a fresh iframe
 //! (`assets/editor/runner.html`), so stopping or rerunning a program frees
-//! everything it held. The editor is Monaco, loaded from a CDN, with easl's
-//! language support compiled to WebAssembly from `editor/analysis` and run
-//! in a worker (`analysis-worker.js`): diagnostics, hover,
-//! go-to-definition, completion, formatting, and structural editing.
+//! everything it held. The editor is Monaco, an npm dependency of the
+//! generator (`package.json`) copied into the site at a path naming its
+//! version (`editor/monaco/<version>/vs/`), with easl's language support
+//! compiled to WebAssembly from `editor/analysis` and run in a worker
+//! (`analysis-worker.js`): diagnostics, hover, go-to-definition, completion,
+//! formatting, and structural editing. Everything the editor loads is on
+//! its own origin.
 //!
 //! The docs' examples (the landing page's program, the files in
 //! `pages/editor/`, and every live preview's program) are ordinary sketches
@@ -18,7 +21,8 @@
 //! `pages/editor/sketch-ids.json` so the docs can link to them. The
 //! generator writes them to `editor/examples.json`, which the server's
 //! `sync-examples` turns into those sketches, and the build's version and
-//! Monaco's to `editor/manifest.json`, for the server.
+//! Monaco's to `editor/manifest.json`, for the server, whose editor page
+//! loads Monaco from the path naming that version.
 
 use std::{
   collections::hash_map::RandomState,
@@ -32,7 +36,7 @@ use std::{
 use easl::{compile_easl_source_to_wgsl, web_bundle::bundle_program};
 use serde_json::json;
 
-use crate::{landing::RUNTIME_DIR, nested_build};
+use crate::{landing::RUNTIME_DIR, nested_build, npm};
 
 /// Where the editor's files go, relative to the site root.
 pub const EDITOR_DIR: &str = "editor";
@@ -73,10 +77,22 @@ const SKETCH_IDS_PATH: &str = "../pages/editor/sketch-ids.json";
 /// The program a new sketch starts with.
 const NEW_SKETCH: &str = include_str!("../assets/editor/new-sketch.easl");
 
-/// The Monaco editor version the page loads from jsdelivr.
-const MONACO_VERSION: &str = "0.52.2";
+/// Monaco's npm package, in the generator's `node_modules/`.
+const MONACO_PACKAGE: &str = "monaco-editor";
 
-/// The page's own scripts and styles, copied into `EDITOR_DIR`.
+/// Where Monaco goes in `EDITOR_DIR`: each version in a directory of its
+/// own (`monaco/0.52.2/vs/`), so its files' URLs change with the version.
+const MONACO_DIR: &str = "monaco";
+
+/// The parts of Monaco's AMD build (`min/vs/`) the editor loads: the loader,
+/// the editor with its styles, and its worker and icon font. The languages
+/// in `basic-languages/` and `language/` load only when a model of theirs is
+/// made, and the editor's models are all easl.
+const MONACO_FILES: &[&str] = &["loader.js", "editor", "base"];
+
+/// The page's own scripts and styles and the page programs run in
+/// (`runner.html`), copied into `EDITOR_DIR` with `__VERSION__` replaced by
+/// the build's version and `__RUNTIME__` by the web runtime's path.
 const ASSETS: &[(&str, &str)] = &[
   ("editor.js", include_str!("../assets/editor/editor.js")),
   (
@@ -101,6 +117,13 @@ const ASSETS: &[(&str, &str)] = &[
     include_str!("../assets/editor/analysis-worker.js"),
   ),
   ("new-sketch.easl", NEW_SKETCH),
+  ("runner.js", include_str!("../assets/editor/runner.js")),
+  (
+    "runner-audio.js",
+    include_str!("../assets/editor/runner-audio.js"),
+  ),
+  ("runner.css", include_str!("../assets/editor/runner.css")),
+  ("runner.html", include_str!("../assets/editor/runner.html")),
 ];
 
 /// One of the docs' example programs, which the editor has as a sketch.
@@ -297,7 +320,6 @@ fn build_version(analysis_dir: &Path, runtime_dir: &Path) -> String {
   for (name, contents) in ASSETS {
     (name, contents).hash(&mut hasher);
   }
-  include_str!("../assets/editor/runner.html").hash(&mut hasher);
   let mut analysis_files: Vec<PathBuf> = fs::read_dir(analysis_dir)
     .unwrap()
     .map(|entry| entry.unwrap().path())
@@ -313,6 +335,62 @@ fn build_version(analysis_dir: &Path, runtime_dir: &Path) -> String {
     }
   }
   format!("{:016x}", hasher.finish())
+}
+
+/// Copies `from` (a file or a directory, recursively) to `to`, leaving
+/// files that are already there unchanged alone (so a server reading them
+/// meanwhile never sees one half-written).
+fn copy_recursively(from: &Path, to: &Path) {
+  if from.is_dir() {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+      let entry = entry.unwrap();
+      copy_recursively(&entry.path(), &to.join(entry.file_name()));
+    }
+  } else if fs::read(to).ok() != Some(fs::read(from).unwrap()) {
+    fs::create_dir_all(to.parent().unwrap()).unwrap();
+    fs::copy(from, to).unwrap_or_else(|e| {
+      panic!("couldn't copy {} to {}: {e}", from.display(), to.display())
+    });
+  }
+}
+
+/// Installs Monaco if needed (see `npm.rs`) and copies `MONACO_FILES` and
+/// its license into `editor_dir`'s `MONACO_DIR/<version>/`, removing other
+/// versions' copies. Returns the version.
+fn copy_monaco(manifest_dir: &Path, editor_dir: &Path) -> String {
+  npm::ensure_installed(manifest_dir);
+  let version = npm::installed_version(manifest_dir, MONACO_PACKAGE)
+    .unwrap_or_else(|| panic!("{MONACO_PACKAGE} isn't installed"));
+  let package = manifest_dir.join("node_modules").join(MONACO_PACKAGE);
+  let monaco_dir = editor_dir.join(MONACO_DIR);
+  if let Ok(entries) = fs::read_dir(&monaco_dir) {
+    for entry in entries {
+      let entry = entry.unwrap();
+      let path = entry.path();
+      if entry.file_name() == version.as_str() {
+        continue;
+      }
+      if path.is_dir() {
+        fs::remove_dir_all(path).unwrap();
+      } else {
+        fs::remove_file(path).unwrap();
+      }
+    }
+  }
+  let out = monaco_dir.join(&version);
+  for name in MONACO_FILES {
+    let part = package.join("min/vs").join(name);
+    assert!(
+      part.exists(),
+      "Monaco {version} has no {}: update MONACO_FILES (editor.rs) and how \
+       editor.js loads Monaco for its layout",
+      part.display()
+    );
+    copy_recursively(&part, &out.join("vs").join(name));
+  }
+  copy_recursively(&package.join("LICENSE"), &out.join("LICENSE"));
+  version
 }
 
 /// Writes the editor's files and `examples` (for the server to keep as
@@ -336,18 +414,15 @@ pub fn generate(site_dir: &Path, examples: Vec<Example>) {
       )
     });
   }
+  let monaco_version = copy_monaco(&manifest_dir, &dir);
   let version = build_version(&dir.join("analysis"), &runtime_dir);
+  let runtime_path = format!("../{RUNTIME_DIR}");
   for (name, contents) in ASSETS {
-    fs::write(dir.join(name), contents.replace("__VERSION__", &version))
-      .unwrap();
+    let contents = contents
+      .replace("__RUNTIME__", &runtime_path)
+      .replace("__VERSION__", &version);
+    fs::write(dir.join(name), contents).unwrap();
   }
-  fs::write(
-    dir.join("runner.html"),
-    include_str!("../assets/editor/runner.html")
-      .replace("__RUNTIME__", &format!("../{RUNTIME_DIR}"))
-      .replace("__VERSION__", &version),
-  )
-  .unwrap();
 
   assert!(
     is_runnable(NEW_SKETCH),
@@ -369,7 +444,7 @@ pub fn generate(site_dir: &Path, examples: Vec<Example>) {
   fs::write(dir.join("examples.json"), examples_json).unwrap();
   fs::write(
     dir.join("manifest.json"),
-    json!({ "version": version, "monaco_version": MONACO_VERSION }).to_string(),
+    json!({ "version": version, "monaco_version": monaco_version }).to_string(),
   )
   .unwrap();
   save_sketch_ids(&manifest_dir.join(SKETCH_IDS_PATH));

@@ -1,0 +1,161 @@
+// Runs one program for the editor, which makes a fresh iframe
+// with this page for every run, so ending a run (removing the iframe)
+// frees everything the program held: its runtime instance, its GPU
+// device, and its window-level input listeners.
+const runtime = new URL("__RUNTIME__/", location.href);
+
+// Compiles a wasm module, streaming, so the browser can cache the
+// compiled code and later runs start faster.
+async function compile(file) {
+  const url = new URL(`${file}?v=__VERSION__`, runtime);
+  try {
+    return await WebAssembly.compileStreaming(fetch(url));
+  } catch {
+    return WebAssembly.compile(await (await fetch(url)).arrayBuffer());
+  }
+}
+
+// The runtime's two builds, each loaded the first time it's needed: the
+// one that compiles programs from their sources (easl_web_compiler.js),
+// for a program the editor hasn't compiled yet, and the plain one
+// (easl_web.js), which runs compiled programs and is much smaller, for
+// one it has. The audio worklet always runs the plain build.
+let compilerBuild = null;
+let plainBuild = null;
+let audioModule = null;
+
+function loadCompilerBuild() {
+  compilerBuild ??= (async () => {
+    const web = await import(new URL("easl_web_compiler.js?v=__VERSION__", runtime));
+    await web.default({ module_or_path: await compile("easl_web_compiler_bg.wasm") });
+    return web;
+  })();
+  return compilerBuild;
+}
+
+function loadPlainBuild() {
+  plainBuild ??= (async () => {
+    const web = await import(new URL("easl_web.js?v=__VERSION__", runtime));
+    await web.default({ module_or_path: await compile("easl_web_bg.wasm") });
+    return web;
+  })();
+  return plainBuild;
+}
+
+/**
+ * Compiles a program without running it: `files` as `[{path, source}]`,
+ * `mainPath` the file holding its `@cpu` entry points. Resolves to
+ * `{bytes, entryPoints}` (see easl's `compileProgram`); a compile error
+ * rejects.
+ */
+window.compileEasl = async ({ files, mainPath }) => {
+  const web = await loadCompilerBuild();
+  const compiled = web.compileProgram(
+    mainPath,
+    files.map((file) => file.path),
+    files.map((file) => file.source),
+  );
+  const result = { bytes: compiled.bytes, entryPoints: compiled.entryPoints };
+  compiled.free();
+  return result;
+};
+
+/**
+ * Starts a compiled program (`bytes`, from `compileEasl`) on this
+ * page's canvas at its `@cpu` entry point `entry`, with its audio at
+ * `volume` (0 to 1), and returns it (`pause`, `resume`, `paused`,
+ * `finished`). `onPrint` gets each line
+ * the program prints, and `onAudioError` each error from the audio
+ * thread (which stops the audio, not the program).
+ */
+window.runEasl = async ({ bytes, entry, volume = 1, onPrint, onAudioError }) => {
+  setEaslVolume(volume);
+  // The build this page already loaded to compile can run it too.
+  const web = await (compilerBuild ?? loadPlainBuild());
+  return web.startProgram(document.getElementById("canvas"), bytes, {
+    module: () => (audioModule ??= compile("easl_web_bg.wasm")),
+    workletUrl: new URL("easl-audio-worklet.js?v=__VERSION__", runtime).href,
+    startMidi: () => listenToMidi(web),
+    onPrint,
+    onAudioError,
+    entry,
+  });
+};
+
+// A picture of the canvas, for a sketch's thumbnail. A WebGPU canvas
+// can only be read while its frame's texture is current, before the
+// browser presents it, so the picture is taken as the program submits
+// the work that draws into that texture (the first submit after it
+// asks for the canvas's texture).
+const captures = [];
+let drawingFrame = false;
+if (window.GPUCanvasContext && window.GPUQueue) {
+  const getCurrentTexture = GPUCanvasContext.prototype.getCurrentTexture;
+  GPUCanvasContext.prototype.getCurrentTexture = function () {
+    drawingFrame = true;
+    return getCurrentTexture.call(this);
+  };
+  const submit = GPUQueue.prototype.submit;
+  GPUQueue.prototype.submit = function (commandBuffers) {
+    const result = submit.call(this, commandBuffers);
+    if (drawingFrame) {
+      drawingFrame = false;
+      if (captures.length > 0) takePictures();
+    }
+    return result;
+  };
+}
+
+function takePictures() {
+  const canvas = document.getElementById("canvas");
+  for (const { width, resolve } of captures.splice(0)) {
+    if (!canvas.width || !canvas.height) {
+      resolve(null);
+      continue;
+    }
+    const scale = Math.min(1, width / canvas.width);
+    const picture = document.createElement("canvas");
+    picture.width = Math.round(canvas.width * scale);
+    picture.height = Math.round(canvas.height * scale);
+    picture.getContext("2d").drawImage(canvas, 0, 0, picture.width, picture.height);
+    picture.toBlob(resolve, "image/webp", 0.85);
+  }
+}
+
+/** Resolves to a picture of the next frame shown (a Blob), at most
+ * `width` wide. */
+window.captureFrame = (width) =>
+  new Promise((resolve) => {
+    captures.push({ width, resolve });
+    // A program that has stopped drawing never asks for a frame.
+    setTimeout(() => {
+      const index = captures.findIndex((capture) => capture.resolve === resolve);
+      if (index >= 0) {
+        captures.splice(index, 1);
+        resolve(null);
+      }
+    }, 2000);
+  });
+
+// Clicking the canvas gives the program the keyboard.
+document.addEventListener("pointerdown", () =>
+  document.getElementById("canvas").focus(),
+);
+
+async function listenToMidi(web) {
+  if (!navigator.requestMIDIAccess) return;
+  try {
+    const access = await navigator.requestMIDIAccess();
+    const listen = (input) => {
+      input.onmidimessage = (event) => web.sendMidiMessage(event.data);
+    };
+    access.inputs.forEach(listen);
+    access.onstatechange = (event) => {
+      if (event.port.type === "input" && event.port.state === "connected") {
+        listen(event.port);
+      }
+    };
+  } catch (error) {
+    console.warn("easl: MIDI unavailable:", error);
+  }
+}

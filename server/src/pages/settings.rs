@@ -3,6 +3,10 @@
 //! Each section posts to its own route. Success redirects back with
 //! `?saved=<section>`; a failure re-renders the page with the error shown in
 //! that section.
+//!
+//! Checks of the current password are rate-limited per account (before
+//! hashing), and verification emails (re-sent, or for a changed address)
+//! per account, besides the site's daily email budget.
 
 use axum::Form;
 use axum::extract::{Query, State};
@@ -14,9 +18,11 @@ use serde::Deserialize;
 use super::account::send_verification;
 use super::{PageContext, render_page, render_status, see_other};
 use crate::auth::{
-  self, CurrentUser, PageUser, clear_session_cookie, delete_other_sessions,
+  self, CurrentUser, PageUser, TokenPurpose, clear_session_cookie,
+  delete_email_tokens, delete_other_sessions,
 };
 use crate::error::{AppError, PageResult};
+use crate::outbox;
 use crate::ratelimit::Action;
 use crate::state::AppState;
 use crate::users;
@@ -80,6 +86,39 @@ fn failed(
   )
 }
 
+/// Fails unless `password` is the user's current password, with `wrong`
+/// as the message when it isn't. Limited per account, checked before
+/// hashing.
+async fn check_password(
+  state: &AppState,
+  user: &CurrentUser,
+  password: &str,
+  wrong: &str,
+) -> Result<(), AppError> {
+  state.limiter.check(
+    Action::PasswordCheck,
+    &user.id.to_string(),
+    state.config.limits.password_checks,
+  )?;
+  if auth::verify_password(state, Some(&user.password_hash), password).await? {
+    Ok(())
+  } else {
+    Err(AppError::forbidden(wrong))
+  }
+}
+
+/// Fails when the account has had too many verification emails lately.
+fn check_verification_limit(
+  state: &AppState,
+  user: &CurrentUser,
+) -> Result<(), AppError> {
+  state.limiter.check_all(
+    Action::VerificationEmail,
+    &user.id.to_string(),
+    &state.config.limits.verification_emails,
+  )
+}
+
 #[derive(Deserialize)]
 pub struct ProfileForm {
   #[serde(default)]
@@ -124,7 +163,9 @@ pub struct EmailForm {
 }
 
 /// `POST /settings/email`: changes the address (needs the password), which
-/// then needs verifying again.
+/// then needs verifying again. The verification email counts against the
+/// account's limit, and the address stays as it is when no email can be
+/// sent.
 pub async fn email(
   State(state): State<AppState>,
   PageUser(user): PageUser,
@@ -133,10 +174,11 @@ pub async fn email(
 ) -> PageResult {
   let result = async {
     let email = validate::email(&form.email)?;
-    if !auth::verify_password(&state, Some(&user.password_hash), &form.password)
-      .await?
-    {
-      return Err(AppError::forbidden("That password isn't right."));
+    check_password(&state, &user, &form.password, "That password isn't right.")
+      .await?;
+    check_verification_limit(&state, &user)?;
+    if !outbox::has_room(&state).await? {
+      return Err(AppError::email_unavailable());
     }
     users::change_email(&state.db, user.id, &email).await?;
     let updated = users::by_id(&state.db, user.id)
@@ -169,7 +211,8 @@ pub struct PasswordForm {
 }
 
 /// `POST /settings/password`: needs the current password; ends the user's
-/// other sessions.
+/// other sessions and invalidates their password-reset links, with the new
+/// password in one transaction.
 pub async fn password(
   State(state): State<AppState>,
   PageUser(user): PageUser,
@@ -181,14 +224,19 @@ pub async fn password(
     if form.password != form.confirm {
       return Err(AppError::bad_request("The new passwords don't match."));
     }
-    if !auth::verify_password(&state, Some(&user.password_hash), &form.current)
-      .await?
-    {
-      return Err(AppError::forbidden("The current password isn't right."));
-    }
+    check_password(
+      &state,
+      &user,
+      &form.current,
+      "The current password isn't right.",
+    )
+    .await?;
     let hash = auth::hash_password(&state, password).await?;
-    users::set_password_hash(&state.db, user.id, &hash).await?;
-    delete_other_sessions(&state.db, user.id, Some(&user.session_hash)).await?;
+    let mut tx = state.db.begin().await?;
+    users::set_password_hash(&mut *tx, user.id, &hash).await?;
+    delete_email_tokens(&mut *tx, user.id, TokenPurpose::Reset).await?;
+    delete_other_sessions(&mut *tx, user.id, Some(&user.session_hash)).await?;
+    tx.commit().await?;
     Ok(())
   }
   .await;
@@ -198,7 +246,8 @@ pub async fn password(
   }
 }
 
-/// `POST /settings/verification`: sends a new verification email.
+/// `POST /settings/verification`: sends a new verification email, within
+/// the account's limit and the day's email budget.
 pub async fn resend_verification(
   State(state): State<AppState>,
   PageUser(user): PageUser,
@@ -207,14 +256,16 @@ pub async fn resend_verification(
   if user.email_verified() {
     return Ok(see_other("/settings"));
   }
-  if let Err(error) = state.limiter.check(
-    Action::VerificationEmail,
-    &user.id.to_string(),
-    state.config.limits.verification_emails,
-  ) {
-    return failed(&state, &page, &user, "email", error, context! {});
-  }
-  let link = send_verification(&state, &user).await?;
+  let sent = match check_verification_limit(&state, &user) {
+    Ok(()) => send_verification(&state, &user).await,
+    Err(error) => Err(error),
+  };
+  let link = match sent {
+    Ok(link) => link,
+    Err(error) => {
+      return failed(&state, &page, &user, "email", error, context! {});
+    }
+  };
   render_page(
     &state,
     &page,
@@ -251,11 +302,8 @@ pub async fn delete_account(
         "Tick the box to confirm you want to delete your account.",
       ));
     }
-    if !auth::verify_password(&state, Some(&user.password_hash), &form.password)
-      .await?
-    {
-      return Err(AppError::forbidden("That password isn't right."));
-    }
+    check_password(&state, &user, &form.password, "That password isn't right.")
+      .await?;
     users::delete(&state.db, user.id).await?;
     Ok(())
   }

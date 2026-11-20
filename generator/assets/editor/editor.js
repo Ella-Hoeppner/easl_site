@@ -35,7 +35,10 @@ import { setUpHelp, setUpSplitters } from "./layout.js?v=__VERSION__";
 
 const page = JSON.parse($("page-data").textContent);
 const user = page.user;
-const MONACO = document.documentElement.dataset.monaco;
+// Monaco's version, and where the site keeps it (`editor/monaco/<version>/`,
+// beside this file).
+const MONACO_VERSION = document.documentElement.dataset.monacoVersion;
+const MONACO = new URL(`monaco/${MONACO_VERSION}`, import.meta.url).href;
 
 // The program a new sketch starts with.
 const starter = await fetch(new URL("new-sketch.easl?v=__VERSION__", import.meta.url))
@@ -73,20 +76,17 @@ function hash(text) {
 function loadMonaco() {
   return new Promise((resolve, reject) => {
     if (typeof require === "undefined") {
-      reject(new Error("the editor couldn't be loaded"));
+      reject(new Error("its loader didn't load"));
       return;
     }
-    // Monaco's own workers come from the CDN too, which a page can only
-    // start through a same-origin script.
+    // Every file the loader and the workers load is asked for with the
+    // version as its query, so browsers keep it for good (its path names
+    // the version too).
+    const urlArgs = `v=${encodeURIComponent(MONACO_VERSION)}`;
     window.MonacoEnvironment = {
-      getWorkerUrl: () =>
-        "data:text/javascript;charset=utf-8," +
-        encodeURIComponent(
-          `self.MonacoEnvironment = { baseUrl: "${MONACO}/" };` +
-            `importScripts("${MONACO}/vs/base/worker/workerMain.js");`,
-        ),
+      getWorkerUrl: () => `${MONACO}/vs/base/worker/workerMain.js?${urlArgs}`,
     };
-    require.config({ paths: { vs: `${MONACO}/vs` } });
+    require.config({ paths: { vs: `${MONACO}/vs` }, urlArgs });
     require(["vs/editor/editor.main"], () => resolve(window.monaco), reject);
   });
 }
@@ -97,8 +97,7 @@ try {
   monaco = await loadMonaco();
 } catch (error) {
   $("editor").textContent =
-    `The editor couldn't be loaded (${error.message}). It comes from ` +
-    `cdn.jsdelivr.net; check that the page can reach it.`;
+    `The editor couldn't be loaded (${error.message}). Try reloading the page.`;
   throw error;
 }
 registerEasl(monaco);

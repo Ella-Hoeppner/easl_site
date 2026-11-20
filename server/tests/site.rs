@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::collections::HashMap;
+
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use serde_json::{Value, json};
@@ -204,6 +206,69 @@ async fn editor_pages() {
     let response = client.get(path).await;
     assert_eq!(response.status, StatusCode::NOT_FOUND, "{path}");
   }
+}
+
+/// A Content-Security-Policy header's directives, by name.
+fn csp_directives(policy: &str) -> HashMap<String, Vec<String>> {
+  policy
+    .split(';')
+    .filter_map(|directive| {
+      let mut words = directive.split_whitespace();
+      let name = words.next()?.to_string();
+      Some((name, words.map(str::to_string).collect()))
+    })
+    .collect()
+}
+
+#[tokio::test]
+async fn editor_pages_content_security_policy() {
+  let app = TestApp::new().await;
+  let mut alice = app.user("alice").await;
+  let id = id_of(&alice.create_sketch("Mine", "public").await);
+  let mut client = app.client();
+  for path in ["/new".to_string(), format!("/s/{id}")] {
+    let page = client.get(&path).await;
+    let policy = page
+      .header("content-security-policy")
+      .unwrap_or_else(|| panic!("{path} has no Content-Security-Policy"));
+    let directives = csp_directives(&policy);
+    let sources =
+      |name: &str| directives.get(name).cloned().unwrap_or_default();
+    // Everything the editor loads is on its own origin.
+    assert_eq!(sources("default-src"), ["'self'"], "{path}");
+    assert_eq!(
+      sources("script-src"),
+      ["'self'", "'wasm-unsafe-eval'"],
+      "{path}"
+    );
+    assert_eq!(sources("frame-ancestors"), ["'self'"], "{path}");
+    assert_eq!(sources("object-src"), ["'none'"], "{path}");
+    for (name, sources) in &directives {
+      for source in sources {
+        assert!(
+          source.starts_with('\'') || source.ends_with(':'),
+          "{path}'s {name} allows the host {source}"
+        );
+      }
+    }
+    // Monaco comes from the site, at the manifest's version.
+    let text = page.text();
+    assert!(
+      text.contains("src=\"/editor/monaco/0.99.0/vs/loader.js?v=0.99.0\""),
+      "{path}"
+    );
+    assert!(text.contains("data-monaco-version=\"0.99.0\""), "{path}");
+    assert!(
+      !text.contains("src=\"http"),
+      "{path} loads from another host"
+    );
+  }
+  // The other pages keep the stricter policy.
+  let explore = client.get("/").await;
+  let policy = explore.header("content-security-policy").expect("csp");
+  let directives = csp_directives(&policy);
+  assert!(!directives.contains_key("style-src"));
+  assert!(!policy.contains("unsafe"));
 }
 
 #[tokio::test]
@@ -519,7 +584,7 @@ async fn auth_rate_limit_per_address() {
 async fn per_user_rate_limits() {
   let app = TestApp::with_config(|config| {
     config.limits.comments = Limit::new(2, 60);
-    config.limits.sketch_creates = Limit::new(2, 3600);
+    config.limits.sketch_creates[0] = Limit::new(2, 3600);
     config.limits.reports = Limit::new(1, 3600);
   })
   .await;

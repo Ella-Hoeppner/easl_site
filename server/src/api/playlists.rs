@@ -66,6 +66,7 @@ pub async fn create(
   if let Some(sketch_id) = &body.sketch_id {
     sketches::find_visible(&state.db, sketch_id, &viewer).await?;
   }
+  playlists::check_create_limit(&state, &user)?;
   let id =
     playlists::create(&state.db, user.id, &title, &description, visibility)
       .await?;

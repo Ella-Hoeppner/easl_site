@@ -5,3 +5,6 @@
 /site/
 
 .DS_Store
+
+# The editor's JavaScript libraries (`npm ci` in generator/ installs them)
+/generator/node_modules/

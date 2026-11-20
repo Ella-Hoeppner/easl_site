@@ -103,6 +103,7 @@ pub async fn create(
     playlists::check_visibility(&user, visibility)?;
     let title = validate::playlist_title(&form.title)?;
     let description = validate::playlist_description(&form.description)?;
+    playlists::check_create_limit(&state, &user)?;
     playlists::create(&state.db, user.id, &title, &description, visibility)
       .await
   }

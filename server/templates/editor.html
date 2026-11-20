@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-monaco="https://cdn.jsdelivr.net/npm/monaco-editor@{{ monaco_version }}/min">
+<html lang="en" data-monaco-version="{{ monaco_version }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,7 +13,7 @@
 {% if og.image %}<meta property="og:image" content="{{ og.image }}">
 <meta name="twitter:card" content="summary_large_image">{% endif %}
 <link rel="stylesheet" href="/editor/editor.css?v={{ asset_version }}">
-<script src="https://cdn.jsdelivr.net/npm/monaco-editor@{{ monaco_version }}/min/vs/loader.js"></script>
+<script src="/editor/monaco/{{ monaco_version }}/vs/loader.js?v={{ monaco_version }}"></script>
 </head>
 <body>
 <header class="bar">

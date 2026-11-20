@@ -633,7 +633,7 @@ async fn me_sketches_and_editor_page() {
   assert_eq!(data["csrf_ok"], true);
   assert!(data["playlist"].is_null());
   let text = page.text();
-  assert!(text.contains("monaco-editor@0.99.0"));
+  assert!(text.contains("/editor/monaco/0.99.0/vs/loader.js"));
   assert!(text.contains("?v=abc123"));
   assert!(page.page().contains(&format!("{ORIGIN}/s/")));
   assert_eq!(page.header("cache-control").as_deref(), Some("no-store"));

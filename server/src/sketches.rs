@@ -9,12 +9,23 @@
 //!
 //! Its tags ([`crate::tags`]) are read with it, and explore can filter by
 //! them.
+//!
+//! Saving prunes old revisions past the sketch's history budget, and
+//! refuses a save or new sketch that would take its owner's sketches'
+//! histories past the account's, which is larger once the account's email
+//! address is verified ([`crate::config::HistoryBudget`]). Since
+//! pruning can delete a revision a [`SketchRow`] read earlier names, the
+//! methods that read a row's revisions do so in one transaction, rereading
+//! the row when its revision has gone.
+
+use std::borrow::Cow;
 
 use anyhow::anyhow;
 use serde::Serialize;
-use sqlx::{FromRow, SqliteExecutor, SqlitePool};
+use sqlx::{FromRow, SqliteConnection, SqliteExecutor, SqlitePool};
 
 use crate::auth::Viewer;
+use crate::config::HistoryBudget;
 use crate::db::{ID_ATTEMPTS, is_unique_violation, new_public_id, now};
 use crate::error::AppError;
 use crate::revisions::{self, Contents};
@@ -285,6 +296,26 @@ impl SketchRow {
     }
   }
 
+  /// This row, or the sketch as it is now when the revision `which` names
+  /// in this row is gone (a save since this row was read moved the head or
+  /// published revision and pruned it), read on `conn`, whose transaction
+  /// then sees that revision's files as of the same moment.
+  async fn current(
+    &self,
+    conn: &mut SqliteConnection,
+    viewer: &Viewer,
+    which: impl Fn(&SketchRow) -> Option<i64>,
+  ) -> sqlx::Result<Cow<'_, SketchRow>> {
+    match which(self) {
+      Some(number) if !revisions::exists(conn, &self.id, number).await? => {}
+      _ => return Ok(Cow::Borrowed(self)),
+    }
+    let row = find(conn, &self.id, viewer)
+      .await?
+      .ok_or(sqlx::Error::RowNotFound)?;
+    Ok(Cow::Owned(row))
+  }
+
   /// The full API shape, loading the files of the revision the viewer
   /// sees.
   pub async fn detail(
@@ -292,12 +323,17 @@ impl SketchRow {
     db: &SqlitePool,
     viewer: &Viewer,
   ) -> sqlx::Result<Sketch> {
-    let mut conn = db.acquire().await?;
-    let number = self.shown_revision(viewer);
+    let mut tx = db.begin().await?;
+    let row = self
+      .current(&mut tx, viewer, |row| Some(row.shown_revision(viewer)))
+      .await?;
+    let number = row.shown_revision(viewer);
+    let files = revisions::files(&mut tx, &row.id, number).await?;
+    tx.commit().await?;
     Ok(Sketch {
-      summary: self.summary(viewer),
-      description: self.description.clone(),
-      files: revisions::files(&mut conn, &self.id, number).await?,
+      summary: row.summary(viewer),
+      description: row.description.clone(),
+      files,
     })
   }
 
@@ -306,23 +342,58 @@ impl SketchRow {
     &self,
     db: &SqlitePool,
   ) -> sqlx::Result<Option<Published>> {
-    let Some(revision) = self.published_revision else {
+    let anyone = Viewer::of(None);
+    let mut tx = db.begin().await?;
+    let row = self
+      .current(&mut tx, &anyone, |row| row.published_revision)
+      .await?;
+    let Some(revision) = row.published_revision else {
       return Ok(None);
     };
-    let mut conn = db.acquire().await?;
+    let files = revisions::files(&mut tx, &row.id, revision).await?;
+    tx.commit().await?;
     Ok(Some(Published {
       revision,
-      files: revisions::files(&mut conn, &self.id, revision).await?,
-      entry_file: self.published_entry_file.clone(),
-      entry_name: self.published_entry_name.clone(),
-      published_at: self.published_updated_at,
+      files,
+      entry_file: row.published_entry_file.clone(),
+      entry_name: row.published_entry_name.clone(),
+      published_at: row.published_updated_at,
     }))
   }
 
   /// The head's files and entry point.
   pub async fn head_contents(&self, db: &SqlitePool) -> sqlx::Result<Contents> {
-    let mut conn = db.acquire().await?;
-    revisions::contents(&mut conn, &self.id, self.head_revision).await
+    self.contents(db, None).await
+  }
+
+  /// The files and entry point of the revision the viewer sees.
+  pub async fn shown_contents(
+    &self,
+    db: &SqlitePool,
+    viewer: &Viewer,
+  ) -> sqlx::Result<Contents> {
+    self.contents(db, Some(viewer)).await
+  }
+
+  /// The contents of the revision `viewer` sees, or of the head without a
+  /// viewer.
+  async fn contents(
+    &self,
+    db: &SqlitePool,
+    viewer: Option<&Viewer>,
+  ) -> sqlx::Result<Contents> {
+    let shown = |row: &SketchRow| match viewer {
+      Some(viewer) => row.shown_revision(viewer),
+      None => row.head_revision,
+    };
+    let anyone = Viewer::of(None);
+    let mut tx = db.begin().await?;
+    let row = self
+      .current(&mut tx, viewer.unwrap_or(&anyone), |row| Some(shown(row)))
+      .await?;
+    let contents = revisions::contents(&mut tx, &row.id, shown(&row)).await?;
+    tx.commit().await?;
+    Ok(contents)
   }
 }
 
@@ -332,7 +403,7 @@ pub fn thumbnail_url(id: &str, version: i64) -> String {
 
 /// A sketch by id, whatever its visibility.
 pub async fn find(
-  db: &SqlitePool,
+  db: impl SqliteExecutor<'_>,
   id: &str,
   viewer: &Viewer,
 ) -> sqlx::Result<Option<SketchRow>> {
@@ -369,18 +440,18 @@ pub struct NewSketch {
   pub tags: Vec<String>,
 }
 
-/// Stores a new sketch for `owner_id`, returning its id.
+/// Stores a new sketch for `owner_id`, returning its id; fails when it
+/// would take the owner past the account's history budget.
 pub async fn create(
   db: &SqlitePool,
   owner_id: i64,
   sketch: &NewSketch,
+  budget: &HistoryBudget,
 ) -> Result<String, AppError> {
   for _ in 0..ID_ATTEMPTS {
     let id = new_public_id();
-    match insert(db, &id, owner_id, sketch).await {
-      Ok(()) => return Ok(id),
-      Err(error) if is_unique_violation(&error) => continue,
-      Err(error) => return Err(error.into()),
+    if insert(db, &id, owner_id, sketch, budget).await? {
+      return Ok(id);
     }
   }
   Err(AppError::Internal(anyhow!(
@@ -388,19 +459,21 @@ pub async fn create(
   )))
 }
 
-/// Stores a new sketch with a chosen id; a unique violation when the id is
-/// taken.
+/// Stores a new sketch with a chosen id, returning false (and storing
+/// nothing) when the id is taken; fails when it would take the owner past
+/// the account's history budget.
 pub async fn insert(
   db: &SqlitePool,
   id: &str,
   owner_id: i64,
   sketch: &NewSketch,
-) -> sqlx::Result<()> {
-  let mut tx = db.begin().await?;
+  budget: &HistoryBudget,
+) -> Result<bool, AppError> {
+  let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
   let now = now();
   let public = sketch.visibility == Visibility::Public;
   let published = sketch.visibility != Visibility::Private;
-  sqlx::query(
+  let inserted = sqlx::query(
     "INSERT INTO sketches (id, owner_id, title, description, visibility, \
      head_revision, published_revision, forked_from, created_at, \
      updated_at, published_at, published_updated_at) \
@@ -418,10 +491,83 @@ pub async fn insert(
   .bind(public.then_some(now))
   .bind(published.then_some(now))
   .execute(&mut *tx)
-  .await?;
+  .await;
+  match inserted {
+    Ok(_) => {}
+    Err(error) if is_unique_violation(&error) => return Ok(false),
+    Err(error) => return Err(error.into()),
+  }
   revisions::insert(&mut tx, id, 1, &sketch.contents, now).await?;
+  let account = AccountHistory::of(&mut tx, owner_id).await?;
+  if account.bytes > account.budget(budget) {
+    return Err(account.refusal("Creating this sketch", budget));
+  }
   tags::set(&mut tx, id, &sketch.tags).await?;
-  tx.commit().await
+  tx.commit().await?;
+  Ok(true)
+}
+
+/// What an account's sketches' histories hold, and whether its email
+/// address is verified (which sets its budget).
+struct AccountHistory {
+  bytes: i64,
+  verified: bool,
+}
+
+impl AccountHistory {
+  async fn of(
+    conn: &mut SqliteConnection,
+    owner_id: i64,
+  ) -> sqlx::Result<Self> {
+    let (bytes, verified) = sqlx::query_as(
+      "SELECT (SELECT COALESCE(SUM(s.history_bytes), 0) FROM sketches s \
+       WHERE s.owner_id = u.id), u.email_verified_at IS NOT NULL \
+       FROM users u WHERE u.id = ?",
+    )
+    .bind(owner_id)
+    .fetch_one(conn)
+    .await?;
+    Ok(AccountHistory { bytes, verified })
+  }
+
+  /// The most the account's histories may hold.
+  fn budget(&self, budget: &HistoryBudget) -> i64 {
+    budget.per_account(self.verified)
+  }
+
+  /// The error for `doing` something that would take the account past its
+  /// budget. An unverified account is told that verifying raises it.
+  fn refusal(&self, doing: &str, budget: &HistoryBudget) -> AppError {
+    let limit = megabytes(self.budget(budget));
+    let message = if self.verified {
+      format!(
+        "{doing} would take the saved versions of all your sketches past \
+         {limit}, the most an account can keep. Delete sketches you no \
+         longer need to make room. (Each sketch keeps its recent versions, \
+         dropping the oldest as it grows, so smaller programs keep more of \
+         them.)"
+      )
+    } else {
+      format!(
+        "{doing} would take the saved versions of all your sketches past \
+         {limit}, the most an account can keep until its email address is \
+         verified. Verify your email address to raise the limit to {}, or \
+         delete sketches you no longer need to make room.",
+        megabytes(budget.per_verified_account)
+      )
+    };
+    AppError::TooLarge(message)
+  }
+}
+
+/// A size in bytes as megabytes, for messages.
+fn megabytes(bytes: i64) -> String {
+  let megabytes = bytes as f64 / (1024.0 * 1024.0);
+  if megabytes >= 10.0 || megabytes.fract() == 0.0 {
+    format!("{megabytes:.0} MB")
+  } else {
+    format!("{megabytes:.1} MB")
+  }
 }
 
 /// A validated full new state of a sketch's editable fields.
@@ -441,6 +587,7 @@ pub struct SketchUpdate {
 /// What [`update`] reads of a sketch before changing it.
 #[derive(FromRow)]
 struct Current {
+  owner_id: i64,
   title: String,
   description: String,
   #[sqlx(try_from = "String")]
@@ -457,22 +604,34 @@ struct Current {
 /// revision stays), and replaces the tags when given. `updated_at` changes
 /// only when something does, and `published_at` is set the first time the
 /// sketch becomes public.
+///
+/// A new revision that takes the sketch's history past its budget prunes
+/// the oldest revisions other than the new head and published ones. When,
+/// even so, it takes the owner's sketches' histories past the account's
+/// budget (smaller while its email address is unverified), and further
+/// past it than they were, nothing is saved and it fails with
+/// [`AppError::TooLarge`].
 pub async fn update(
   db: &SqlitePool,
   id: &str,
   update: &SketchUpdate,
-) -> sqlx::Result<()> {
+  budget: &HistoryBudget,
+) -> Result<(), AppError> {
   // Immediate, so the revision numbering read and the write that follows
   // it can't interleave with another save.
   let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
   let current: Current = sqlx::query_as(
-    "SELECT title, description, visibility, head_revision, \
+    "SELECT owner_id, title, description, visibility, head_revision, \
      published_revision, published_updated_at FROM sketches WHERE id = ?",
   )
   .bind(id)
   .fetch_one(&mut *tx)
   .await?;
   let now = now();
+  let before = match &update.contents {
+    Some(_) => AccountHistory::of(&mut tx, current.owner_id).await?.bytes,
+    None => 0,
+  };
   let head = match &update.contents {
     Some(contents) => {
       revisions::save(&mut tx, id, current.head_revision, contents, now)
@@ -488,6 +647,14 @@ pub async fn update(
   } else {
     current.published_revision
   };
+  if head != current.head_revision {
+    revisions::prune(&mut tx, id, budget.per_sketch, [Some(head), published])
+      .await?;
+    let after = AccountHistory::of(&mut tx, current.owner_id).await?;
+    if after.bytes > after.budget(budget) && after.bytes > before {
+      return Err(after.refusal("Saving this", budget));
+    }
+  }
   let published_updated_at = if published == current.published_revision {
     current.published_updated_at
   } else {
@@ -525,7 +692,8 @@ pub async fn update(
     .execute(&mut *tx)
     .await?;
   }
-  tx.commit().await
+  tx.commit().await?;
+  Ok(())
 }
 
 /// Makes a sketch's head its published revision, when it's unlisted or

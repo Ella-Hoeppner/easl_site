@@ -18,6 +18,7 @@ use sqlx::SqlitePool;
 
 use crate::auth::hash_password_blocking;
 use crate::comments;
+use crate::config::HistoryBudget;
 use crate::db;
 use crate::examples::{self, Example};
 use crate::playlists;
@@ -220,7 +221,7 @@ async fn create_sketch(
   owner: i64,
   sketch: &NewSketch,
 ) -> anyhow::Result<String> {
-  sketches::create(db, owner, sketch)
+  sketches::create(db, owner, sketch, &HistoryBudget::default())
     .await
     .map_err(|e| e.into_anyhow().context("creating a sketch"))
 }

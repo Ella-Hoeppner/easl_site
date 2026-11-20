@@ -19,6 +19,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::auth::Viewer;
+use crate::config::HistoryBudget;
 use crate::db::is_public_id;
 use crate::error::AppError;
 use crate::revisions::Contents;
@@ -119,14 +120,22 @@ pub async fn sync(
     changes.push((example.sketch_id.as_str(), change));
   }
   let mut report = SyncReport::default();
+  let budget = HistoryBudget::default();
   for (id, change) in changes {
     match change {
       Change::Create(sketch) => {
-        sketches::insert(db, id, owner.id, &sketch).await?;
+        let inserted = sketches::insert(db, id, owner.id, &sketch, &budget)
+          .await
+          .map_err(AppError::into_anyhow)?;
+        if !inserted {
+          bail!("the sketch id {id:?} was taken while syncing");
+        }
         report.created += 1;
       }
       Change::Update(update) => {
-        sketches::update(db, id, &update).await?;
+        sketches::update(db, id, &update, &budget)
+          .await
+          .map_err(AppError::into_anyhow)?;
         report.updated += 1;
       }
       Change::Unchanged => report.unchanged += 1,

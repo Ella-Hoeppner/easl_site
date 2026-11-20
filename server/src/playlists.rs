@@ -7,7 +7,9 @@ use sqlx::{FromRow, SqlitePool};
 use crate::auth::{CurrentUser, Viewer};
 use crate::db::{ID_ATTEMPTS, is_unique_violation, new_public_id, now};
 use crate::error::AppError;
+use crate::ratelimit::Action;
 use crate::sketches::{self, SketchSummary};
+use crate::state::AppState;
 use crate::users::Author;
 use crate::visibility::{Access, Visibility};
 
@@ -197,6 +199,19 @@ pub fn check_visibility(
     user.require_verified("publish playlists")?;
   }
   Ok(())
+}
+
+/// Fails when the user has created too many playlists lately (checked by
+/// both ways of creating one: the API and the form).
+pub fn check_create_limit(
+  state: &AppState,
+  user: &CurrentUser,
+) -> Result<(), AppError> {
+  state.limiter.check(
+    Action::PlaylistCreate,
+    &user.id.to_string(),
+    state.config.limits.playlist_creates,
+  )
 }
 
 /// Creates a playlist, returning its id.

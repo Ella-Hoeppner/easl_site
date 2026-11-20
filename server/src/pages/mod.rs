@@ -33,12 +33,46 @@ use crate::error::{AppError, ErrorPage, PageError, PageResult};
 use crate::state::AppState;
 use crate::text::url_encode;
 
-/// The Content-Security-Policy of the app's own pages (not the editor's,
-/// which loads its editor from a CDN): only same-origin scripts, styles,
-/// and images, no plugins, no framing by other sites.
+/// The Content-Security-Policy of the app's pages: only same-origin
+/// scripts, styles, and images, no plugins, no framing by other sites.
 const PAGE_CSP: &str = "default-src 'self'; img-src 'self' data:; \
   object-src 'none'; base-uri 'self'; form-action 'self'; \
   frame-ancestors 'self'";
+
+/// The editor pages' Content-Security-Policy: [`PAGE_CSP`] with what the
+/// editor needs besides. Everything it loads is on its own origin, so
+/// `default-src 'self'` covers its workers (the analysis worker and
+/// Monaco's, started from same-origin scripts), its fetches, Monaco's icon
+/// font, and the iframe each program runs in (`runner.html`, which sets
+/// its own policy).
+///
+/// - `'wasm-unsafe-eval'`: the analysis worker compiles WebAssembly (a
+///   browser that applies the page's policy to its workers needs it).
+/// - `style-src 'unsafe-inline'`: Monaco makes `<style>` elements and
+///   writes `style` attributes as it renders.
+/// - `img-src data:`: Monaco's stylesheet has images as `data:` URLs.
+const EDITOR_CSP: &str = "default-src 'self'; \
+  script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; \
+  img-src 'self' data:; object-src 'none'; base-uri 'self'; \
+  form-action 'self'; frame-ancestors 'self'";
+
+/// Which Content-Security-Policy an HTML response gets.
+#[derive(Clone, Copy)]
+pub enum Csp {
+  /// [`PAGE_CSP`], for every page but the editor's.
+  Page,
+  /// [`EDITOR_CSP`].
+  Editor,
+}
+
+impl Csp {
+  fn policy(self) -> &'static str {
+    match self {
+      Csp::Page => PAGE_CSP,
+      Csp::Editor => EDITOR_CSP,
+    }
+  }
+}
 
 /// The pages' routes.
 pub fn router() -> Router<AppState> {
@@ -134,7 +168,7 @@ pub fn render_status(
 ) -> PageResult {
   let body =
     render_html(state, page.user.as_ref(), &page.path, template, context)?;
-  Ok(html_response(status, body, true))
+  Ok(html_response(status, body, Csp::Page))
 }
 
 fn render_html(
@@ -159,21 +193,18 @@ fn render_html(
     .render(template, merge_maps([base, context]))
 }
 
-/// An HTML response, with the page CSP when `restrict` is set.
-pub fn html_response(
-  status: StatusCode,
-  body: String,
-  restrict: bool,
-) -> Response {
+/// An HTML response with the Content-Security-Policy `csp`.
+pub fn html_response(status: StatusCode, body: String, csp: Csp) -> Response {
   let mut response = (status, body).into_response();
   let headers = response.headers_mut();
   headers.insert(
     CONTENT_TYPE,
     HeaderValue::from_static("text/html; charset=utf-8"),
   );
-  if restrict {
-    headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(PAGE_CSP));
-  }
+  headers.insert(
+    CONTENT_SECURITY_POLICY,
+    HeaderValue::from_static(csp.policy()),
+  );
   response
 }
 
@@ -225,7 +256,7 @@ fn error_page(
     ..extra
   };
   match render_html(state, user, "/", "error.html", context) {
-    Ok(body) => html_response(status, body, true),
+    Ok(body) => html_response(status, body, Csp::Page),
     Err(error) => {
       tracing::error!("rendering the error page: {error:#}");
       (status, message.to_string()).into_response()

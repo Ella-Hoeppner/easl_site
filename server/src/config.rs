@@ -30,6 +30,17 @@ pub struct Config {
   pub trust_proxy: bool,
   /// Rate limits for abuse-prone actions.
   pub limits: RateLimits,
+  /// How much revision history sketches and accounts may keep.
+  pub history: HistoryBudget,
+  /// How many emails the site sends a day (UTC), at most.
+  pub daily_email_budget: i64,
+  /// The directory holding the database, whose filesystem the free-disk
+  /// guard ([`crate::disk`]) measures.
+  pub data_dir: PathBuf,
+  /// The least free space, in bytes, the database's filesystem must have
+  /// for the site to store sketch content or thumbnails (0 turns the guard
+  /// off).
+  pub min_free_disk: u64,
 }
 
 impl Config {
@@ -48,6 +59,10 @@ impl Config {
       dev,
       trust_proxy: false,
       limits: RateLimits::default(),
+      history: HistoryBudget::default(),
+      daily_email_budget: DAILY_EMAIL_BUDGET,
+      data_dir: PathBuf::from("."),
+      min_free_disk: MIN_FREE_DISK_BYTES,
     }
   }
 
@@ -130,31 +145,145 @@ impl Limit {
   }
 }
 
-/// The rate limits the server enforces.
+/// One hour, in seconds.
+const HOUR: u64 = 60 * 60;
+
+/// One day, in seconds.
+const DAY: u64 = 24 * HOUR;
+
+/// The rate limits the server enforces. Each is a separate bucket, so
+/// hitting one never blocks another action.
 #[derive(Clone, Copy, Debug)]
 pub struct RateLimits {
-  /// Sign-in, sign-up, and password-reset requests, per client address.
+  /// Sign-in attempts and password-reset form submissions, per client
+  /// address.
   pub auth: Limit,
+  /// Sign-ups (each sends a verification email), per client address.
+  pub signups: Limit,
+  /// Password-reset requests (`/forgot`), per client address.
+  pub reset_requests: Limit,
+  /// Password-reset emails, per recipient account, per hour and per day.
+  pub reset_emails: [Limit; 2],
+  /// Verification emails sent for an account after its sign-up (re-sent,
+  /// or for a changed address), per account, per hour and per day.
+  pub verification_emails: [Limit; 2],
+  /// Checks of the current password in settings (changing the email or
+  /// password, deleting the account), per account.
+  pub password_checks: Limit,
   /// Comments posted, per user.
   pub comments: Limit,
-  /// Sketches created (including forks), per user.
-  pub sketch_creates: Limit,
+  /// Sketches created (including forks), per user, per hour and per day.
+  pub sketch_creates: [Limit; 2],
+  /// Playlists created, per user.
+  pub playlist_creates: Limit,
   /// Reports filed, per user.
   pub reports: Limit,
-  /// Verification emails re-sent, per user.
-  pub verification_emails: Limit,
 }
 
 impl Default for RateLimits {
   fn default() -> Self {
     RateLimits {
       auth: Limit::new(10, 10 * 60),
+      signups: Limit::new(5, HOUR),
+      reset_requests: Limit::new(10, HOUR),
+      reset_emails: [Limit::new(3, HOUR), Limit::new(6, DAY)],
+      verification_emails: [Limit::new(3, HOUR), Limit::new(10, DAY)],
+      password_checks: Limit::new(10, 10 * 60),
       comments: Limit::new(10, 60),
-      sketch_creates: Limit::new(30, 60 * 60),
-      reports: Limit::new(10, 60 * 60),
-      verification_emails: Limit::new(5, 60 * 60),
+      sketch_creates: [Limit::new(30, HOUR), Limit::new(100, DAY)],
+      playlist_creates: Limit::new(20, HOUR),
+      reports: Limit::new(10, HOUR),
     }
   }
+}
+
+/// The site-wide number of emails sent a day, at most: below the 100 a day
+/// of Resend's free tier, leaving room for test emails.
+pub const DAILY_EMAIL_BUDGET: i64 = 80;
+
+/// The most one sketch's revision history keeps, in bytes (as
+/// [`crate::revisions::size`] measures revisions): a save that takes it
+/// past this prunes the oldest revisions.
+pub const SKETCH_HISTORY_BYTES: i64 = 10 * 1024 * 1024;
+
+/// The most all of an account's sketches' histories may hold together, in
+/// bytes, while its email address is unverified: a save or new sketch that
+/// would take it past this is refused. Accounts are cheap to make, so an
+/// unverified one gets little.
+pub const UNVERIFIED_ACCOUNT_HISTORY_BYTES: i64 = 5 * 1024 * 1024;
+
+/// The same for an account with a verified email address. Verifying takes
+/// an email, and the site sends at most [`DAILY_EMAIL_BUDGET`] a day, so
+/// verified accounts can't be made in bulk.
+pub const VERIFIED_ACCOUNT_HISTORY_BYTES: i64 = 50 * 1024 * 1024;
+
+/// How much revision history is kept; see [`crate::revisions`].
+#[derive(Clone, Copy, Debug)]
+pub struct HistoryBudget {
+  /// The most one sketch's history keeps, in bytes.
+  pub per_sketch: i64,
+  /// The most an unverified account's sketches' histories hold together,
+  /// in bytes.
+  pub per_unverified_account: i64,
+  /// The most a verified account's sketches' histories hold together, in
+  /// bytes.
+  pub per_verified_account: i64,
+}
+
+impl HistoryBudget {
+  /// The most an account's sketches' histories hold together, by whether
+  /// its email address is verified.
+  pub fn per_account(&self, verified: bool) -> i64 {
+    if verified {
+      self.per_verified_account
+    } else {
+      self.per_unverified_account
+    }
+  }
+}
+
+impl Default for HistoryBudget {
+  fn default() -> Self {
+    HistoryBudget {
+      per_sketch: SKETCH_HISTORY_BYTES,
+      per_unverified_account: UNVERIFIED_ACCOUNT_HISTORY_BYTES,
+      per_verified_account: VERIFIED_ACCOUNT_HISTORY_BYTES,
+    }
+  }
+}
+
+/// The least free space the database's filesystem must have for the site
+/// to store sketch content or thumbnails, in bytes.
+pub const MIN_FREE_DISK_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Parses a size in bytes: a whole number with an optional binary unit
+/// (`K`, `M`, `G`, or `T`, optionally followed by `B` or `iB`, in any
+/// case), so `2G`, `2GB`, `2GiB`, and `2147483648` are the same.
+pub fn parse_size(text: &str) -> Result<u64, String> {
+  let text = text.trim();
+  let digits = text
+    .find(|c: char| !c.is_ascii_digit())
+    .unwrap_or(text.len());
+  let (number, unit) = text.split_at(digits);
+  let number: u64 = number
+    .parse()
+    .map_err(|_| format!("{text:?} isn't a size like 2G or 500M"))?;
+  let unit = unit.trim().to_ascii_lowercase();
+  let unit = unit
+    .strip_suffix("ib")
+    .or_else(|| unit.strip_suffix('b'))
+    .unwrap_or(&unit);
+  let power = match unit {
+    "" => 0,
+    "k" => 1,
+    "m" => 2,
+    "g" => 3,
+    "t" => 4,
+    _ => return Err(format!("{text:?} has an unknown unit")),
+  };
+  number
+    .checked_mul(1024u64.pow(power))
+    .ok_or_else(|| format!("{text:?} is too large"))
 }
 
 #[cfg(test)]
@@ -199,6 +328,22 @@ mod tests {
     assert!(!config(false).is_allowed_origin("https://easl-lang.org"));
     assert!(!config(true).is_allowed_origin("http://localhost:"));
     assert!(!config(true).is_allowed_origin("http://localhost.evil:80"));
+  }
+
+  #[test]
+  fn sizes() {
+    assert_eq!(parse_size("2G"), Ok(MIN_FREE_DISK_BYTES));
+    assert_eq!(parse_size("2GiB"), Ok(MIN_FREE_DISK_BYTES));
+    assert_eq!(parse_size("2 gb"), Ok(MIN_FREE_DISK_BYTES));
+    assert_eq!(parse_size("500M"), Ok(500 * 1024 * 1024));
+    assert_eq!(parse_size("10k"), Ok(10 * 1024));
+    assert_eq!(parse_size("123"), Ok(123));
+    assert_eq!(parse_size("0"), Ok(0));
+    assert!(parse_size("").is_err());
+    assert!(parse_size("G").is_err());
+    assert!(parse_size("2X").is_err());
+    assert!(parse_size("-1").is_err());
+    assert!(parse_size("99999999T").is_err());
   }
 
   #[test]

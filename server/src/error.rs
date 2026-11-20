@@ -24,6 +24,11 @@ pub enum AppError {
   Conflict(String),
   TooLarge(String),
   RateLimited,
+  /// Something the site can't do right now (sending email past its daily
+  /// budget).
+  Unavailable(String),
+  /// The disk is too full to store sketch content ([`crate::disk`]).
+  OutOfStorage,
   Internal(anyhow::Error),
 }
 
@@ -45,6 +50,13 @@ impl AppError {
     AppError::Internal(error.into())
   }
 
+  /// The error for an email the site can't send right now.
+  pub fn email_unavailable() -> Self {
+    AppError::Unavailable(
+      "We can't send email right now. Please try again later.".into(),
+    )
+  }
+
   /// The error for actions that need a verified email address.
   pub fn unverified(action: &str) -> Self {
     AppError::Forbidden(format!(
@@ -62,6 +74,8 @@ impl AppError {
       AppError::Conflict(_) => StatusCode::CONFLICT,
       AppError::TooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
       AppError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+      AppError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+      AppError::OutOfStorage => StatusCode::INSUFFICIENT_STORAGE,
       AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
   }
@@ -73,12 +87,17 @@ impl AppError {
       AppError::BadRequest(m)
       | AppError::Forbidden(m)
       | AppError::Conflict(m)
-      | AppError::TooLarge(m) => m.clone(),
+      | AppError::TooLarge(m)
+      | AppError::Unavailable(m) => m.clone(),
       AppError::Unauthorized => "You need to sign in to do that.".into(),
       AppError::NotFound => "Not found.".into(),
       AppError::RateLimited => {
         "Too many requests. Please wait a while and try again.".into()
       }
+      AppError::OutOfStorage => "The site is out of storage right now, so \
+        it can't save sketches or thumbnails. Your work hasn't been saved; \
+        please try again later."
+        .into(),
       AppError::Internal(_) => {
         "Something went wrong on our end. Please try again.".into()
       }

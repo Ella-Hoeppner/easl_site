@@ -16,7 +16,7 @@ use axum::http::StatusCode;
 use minijinja::{Value, context};
 use serde::{Deserialize, Serialize};
 
-use super::{PageContext, html_response, render_html};
+use super::{Csp, PageContext, html_response, render_html};
 use crate::auth::Viewer;
 use crate::config::Limit;
 use crate::error::{AppError, PageResult};
@@ -119,7 +119,7 @@ fn render_editor(
     "editor.html",
     context,
   )?;
-  Ok(html_response(StatusCode::OK, body, false))
+  Ok(html_response(StatusCode::OK, body, Csp::Editor))
 }
 
 /// `GET /new`: an empty editor for a new sketch.
