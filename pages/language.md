@@ -29,7 +29,7 @@ Easl has three types of comments, `;` for single line comments, `;* ... *;` for 
 
 ## Literals and types
 
-Eash has primitive integer types `u32`, `i32`, and `f32`. You can write an explicit literal of each type like `5u`, `5i`, `5.`, respectively, but you can can also do an ambiguous `5` and let the compiler figure it out (in most cases).
+Easl has primitive integer types `u32`, `i32`, and `f32`. You can write an explicit literal of each type like `5u`, `5i`, `5.`, respectively, but you can can also do an ambiguous `5` and let the compiler figure it out (in most cases).
 
 You can ascribe a type to an expression with the `:` operator, like `5: u32`. This ascription operator can occur anywhere in an expression including nested inside other forms, e.g.
 
@@ -39,7 +39,7 @@ You can ascribe a type to an expression with the `:` operator, like `5: u32`. Th
 
 ## Let
 
-`let` binds names in a scope. , and takes the value of the last one. Like everything in easl, it's an expression, usable anywhere a value is:
+`let` binds names in a scope, evaluates the expressions in its body in order, and takes the value of the last one. Like everything in easl, it's an expression, usable anywhere a value is:
 
 ```easl
 (let [x 5.
@@ -171,7 +171,7 @@ Types can't be recursive: a struct or enum can't contain a value of its own type
 
 ## Enums and `match` blocks
 
-Enums represent a union over several types, with a tag to differentiate between them. Each possible variant of the union has a name, and also may carry a value with it. For instance:
+Enums represent a union over several types, with a tag to differentiate between them. Each possible variant of the union has a name, and also may carry values with it. For instance:
 
 ```easl
 (enum Shape
@@ -180,7 +180,7 @@ Enums represent a union over several types, with a tag to differentiate between 
   (Box vec2f))
 ```
 
-Each variant that you define inside an enum automatically gets an associated *constructor* that is used to refer to that variant. Here we end up with three constructors, `Shape/Empty`, `Shape/Circle`, and `Shape/Box`. Unit-like variants which don't contain any internal value, e.g. `Empty`, are used like constants, while variants like `Circle` and `Box` are applied like functions to construct a function:
+Each variant that you define inside an enum automatically gets an associated *constructor* that is used to refer to that variant. Here we end up with three constructors, `Shape/Empty`, `Shape/Circle`, and `Shape/Box`. Unit-like variants which don't contain any internal value, e.g. `Empty`, are used like constants, while variants like `Circle` and `Box` are applied like functions to construct a value:
 
 ```
 (defn default-shape []: Shape
@@ -243,9 +243,9 @@ Easl has a built-in enum called `Option`, with `(Some ...)` and `None` variants.
   _  (* (f32 x) 3.))
 ```
 
-The `_` character, when used in a match pattern, represents a wildcard, and matches any value that hasn't yet been matched by an earlier arm. All match blocks must be exhuastive, so a match block must list out every possible variant (in the case of an enum) or have a `_` as it's last pattern.
+The `_` character, when used in a match pattern, represents a wildcard, and matches any value that hasn't yet been matched by an earlier arm. All match blocks must be exhaustive, so a match block must list out every possible variant (in the case of an enum) or have a `_` as it's last pattern.
 
-`match` blocks can also match vector values against vector literals, but for the moment it isn't possbile to match other struct types.
+`match` blocks can also match vector values against vector literals, but for the moment it isn't possible to match other struct types.
 
 ## `if` and `when`
 
@@ -299,7 +299,7 @@ The `do` expression is used to execute several expressions in order. This can be
   (+= x (f32 i)))
 ```
 
-The `[...]` form following the `for` loop is expected to have four expressions inside. The first should be a name for a variable, in this case `i`. The next expression will be the initial value for the expression, here `0u`. The following two expressions represent the loop condition and increment statement, respectively.
+The `[...]` form following the `for` loop is expected to have four expressions inside. The first should be a name for a variable, in this case `i`. The next expression will be the initial value for the expression, here `0i`. The following two expressions represent the loop condition and increment statement, respectively.
 
 There are also two shorthand syntaxes that simplify common `for`-loop use-cases. You can place two expressions, a name and an upper limit, and this will be interpreted as a zero-initialized value that increments by 1 each iteration until it reaches the limit. The following code is therefore equivalent to the above:
 
@@ -407,8 +407,6 @@ Importantly, references are second-class values in easl. Easl has no first-class
 
 A `def`'s value can be any pure expression, computed once before the program starts: it can call functions and read other top-level values, but it can't print, write a variable, read or write files, read input (the window, the mouse and keyboard, MIDI, the audio clock), or have any other effect, since there'd be no saying when that happens. Do those in `main` instead.
 
-Shaders can read a `def` only when its value is something wgsl can compute on its own: literals, other such `def`s, vector and struct constructors, and builtins like `sin`. One whose value calls a function (including your own functions, an enum's data variant, and `==` on enums) or reads a `var` or the sample rate works anywhere on the CPU and audio thread, and is a compile error in a shader. The same goes for a `@local var`'s initial value.
-
 `override` declares a constant just like `def`, but in the compiled WGSL it becomes an [override constant](https://www.w3.org/TR/WGSL/#override-decls), whose value a WebGPU host running that WGSL can replace when it creates a pipeline. The value written in the program is the default, and it's the value easl's own runtimes always use:
 
 ```easl
@@ -488,7 +486,7 @@ It's also possible to create a local function with `fn`:
                         0.5)))))
 ```
 
-This code is equivalent to the previous example, just that rather than defining `my-fn` as a top-level function, the function is simply constructed in-place. Often the compiler will be able to infer the argument and return types of a `fn`, as it can in the above example, but of course you can always disambiguate with `:` type ascriptions when necessary.
+This code is equivalent to the previous example, just that rather than defining `my-sdf` as a top-level function, the function is simply constructed in-place. Often the compiler will be able to infer the argument and return types of a `fn`, as it can in the above example, but of course you can always disambiguate with `:` type ascriptions when necessary.
 
 Functions created with `fn` are *closures*, meaning they can capture and use variables from the surrounding scope. For instance, we could abstract some important values out in the above code:
 
@@ -609,7 +607,7 @@ Easl code is organized into modules. Each easl file is treated as an implicit mo
 
 @cpu
 (defn main []
-  (print (randomhash 0u)))
+  (print (random/hash 0u)))
 ```
 
 To access a value or function defined in a module, you have to qualify the name with the name of the module, such as `random/hash` in the above code.

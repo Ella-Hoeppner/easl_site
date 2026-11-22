@@ -96,6 +96,14 @@ Logical or. **Associative.** Short-circuits: `b` is evaluated only when `a` is `
 
 Logical negation. `not` is an alias for `!`.
 
+### `xor`
+
+```easl
+(xor a: bool b: bool): bool
+```
+
+Logical exclusive or: `true` when exactly one of `a` and `b` is. **Associative**: with more arguments, it's `true` when an odd number of them are. Unlike `&&` and `||`, it always evaluates every argument. [`^`](#bitwise) on `bool`s is the same function, so `(^ a b)` is `(xor a b)`.
+
 ## Bitwise
 
 ### `&`, `|`, `^`
@@ -107,7 +115,7 @@ Logical negation. `not` is an alias for `!`.
 (op a: T b: (vecN T)): (vecN T)
 ```
 
-Bitwise and, or, and xor on integer types, element-wise on integer vectors with scalar broadcasting. All three are **associative**.
+Bitwise and, or, and xor on integer types, element-wise on integer vectors with scalar broadcasting. All three are **associative**. `^` also takes `bool`s, as [`xor`](#xor).
 
 ### `<<`, `>>`
 

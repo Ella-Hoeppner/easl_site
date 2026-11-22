@@ -415,7 +415,6 @@ See [audio](../cpu.md#audio) in the runtime guide.
 
 ```easl
 (start-audio f: (Fn [] f32)): ()
-(start-audio f: (Fn [f32] f32)): ()
 ```
 
 Starts (or switches) the audio output stream. `f` takes no arguments and is called once per sample, returning a sample in `[-1, 1]`; `(audio-time)` gives the time in seconds. Usually a closure, whose captured state persists between samples. Each call hands off the function it's given, so call it once or when the sound should change, not every frame.

@@ -148,7 +148,7 @@ String literals take the usual escapes: `\n` (newline), `\t` (tab), `\r`, `\"`, 
 
 ## Embedding: `@external` variables
 
-(This section is mainly for rust developers interested in integrating easl into a larger project, you can safely ignore it if you're just using easl as an indepdent language)
+(This section is mainly for rust developers interested in integrating easl into a larger project, you can safely ignore it if you're just using easl as an independent language)
 
 A program hosted inside another application, such as a live-coding editor, can mark globals `@external` for the host to read and write while it runs:
 
@@ -156,4 +156,4 @@ A program hosted inside another application, such as a live-coding editor, can m
 @external (var gain: f32)
 ```
 
-The host creates an `easl::external::ExternalVars` handle from the compiled program, passes it to the runner, and calls `read_external_var` and `write_external_var` (or the `_index` and `_raw` variants) from any thread. The host is one more participant in the sharing above: its writes arrive at the program's next frame or audio buffer, including on the GPU. An `@external` variable has no initial value; the host sets it before the program starts. A variable holding a `String`, or a runtime-sized array nested inside a struct or another array, has no flat word layout, so the host reaches it only through the `Value` methods, not the `_raw` ones.
+The host creates an `easl::external::ExternalVars` handle from the compiled program, passes it to the runner, and calls `read_external_var` and `write_external_var` (or the `_index` and `_raw` variants) from any thread; `external_vars` lists each `@external` variable's name and declared type. The host is one more participant in the sharing above: its writes arrive at the program's next frame or audio buffer, including on the GPU. An `@external` variable has no initial value; the host sets it before the program starts. A variable holding a `String`, or a runtime-sized array nested inside a struct or another array, has no flat word layout, so the host reaches it only through the `Value` methods, not the `_raw` ones.

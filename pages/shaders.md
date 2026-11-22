@@ -47,15 +47,15 @@ Builtin inputs can be read by calling them like functions, anywhere in the right
 
 The explicit forms remain available when you want them: `@{builtin vertex-index}` on an argument, `@{location 0}` on a field or return type. Builtins use wgsl's names in kebab-case, with wgsl's rules about which stages they're valid in.
 
-A vertex shader's other parameters are *vertex data*: each draw passes an array for each of them, and the shader gets the array's element for the current vertex (or instance). See [drawing with vertex data](cpu.md#drawing-with-vertex-data). A data parameter can be a number, a vector or matrix, or a struct or fixed-size array of those, taking up to 16 vertex attributes in all (each number, vector, and matrix column takes one), at locations below 16. A struct can mix builtins with data: its builtin fields come from the GPU, and the rest from the array.
+A vertex shader's other parameters are *vertex data*: each draw passes an array for each of them, and the shader gets the array's element for the current vertex (or instance). See [drawing with vertex data](cpu.md#drawing-with-vertex-data). A data parameter can be a number or `bool`, a vector or matrix, or a struct or fixed-size array of those, taking up to 16 vertex attributes in all (each number, `bool`, vector, and matrix column takes one), at locations below 16. A struct can mix builtins with data: its builtin fields come from the GPU, and the rest from the array.
 
-Data parameters take `@{location N}` like other inputs, and get one automatically when they don't. In the WGSL, numbers, vectors, and structs of those are entry inputs just as you wrote them, so a host running the WGSL can feed them from its own vertex buffers. Other types, like matrices and nested structs, aren't valid wgsl entry inputs, so the entry takes their attributes as inputs (one location for each, counting up from any `@{location}` you wrote, which can't overlap) and rebuilds the value at the top of its body. The same happens to a struct whose automatic locations would differ between two vertex shaders: the first by name keeps it, and the others take attributes.
+Data parameters take `@{location N}` like other inputs, and get one automatically when they don't. In the WGSL, numbers, vectors, and structs of those are entry inputs just as you wrote them, so a host running the WGSL can feed them from its own vertex buffers. Other types, like matrices, nested structs, and `bool`s (and structs holding them), aren't valid wgsl entry inputs, so the entry takes their attributes as inputs (one location for each, counting up from any `@{location}` you wrote, which can't overlap; a `bool`'s is a `u32`, `0` or `1`) and rebuilds the value at the top of its body. The same happens to a struct whose automatic locations would differ between two vertex shaders: the first by name keeps it, and the others take attributes.
 
 A value passed from the vertex shader to the fragment shader is interpolated across each triangle. `@{interpolate …}` on the field or argument chooses how, like wgsl's `@interpolate`:
 
 - `perspective` (the default for floats): perspective-correct interpolation.
 - `linear`: interpolation in screen space.
-- `flat`: no interpolation; every fragment sees one vertex's value. Integer values (and vectors of them) are always flat: they get it without asking, and any other setting is an error.
+- `flat`: no interpolation; every fragment sees one vertex's value. Integer and `bool` values (and vectors of them) are always flat: they get it without asking, and any other setting is an error.
 
 `perspective` and `linear` take a sampling, as `perspective-centroid` for example: `center` (the default), `centroid`, or `sample`. `flat` takes `first` (the default) or `either`. A builtin can't have an interpolation, since it isn't a value passed between stages:
 
@@ -68,10 +68,10 @@ A value passed from the vertex shader to the fragment shader is interpolated acr
 
 ## GPU-bound variables
 
-A top-level `var` is a is shared by the CPU and GPU default, with the exact rules about when/where it can be written determined by it's *address space*.
+A top-level `var` is shared by the CPU and GPU by default, with the exact rules about when/where it can be written determined by it's *address space*.
 
 ```easl
-(var particles: [vec4f])            ; unnanotated vars default to @storage-write
+(var particles: [vec4f])            ; unannotated vars default to @storage-write
 @uniform (var frame-index: u32)
 @storage (var palette: [16: vec3f])
 @local (var seed: u32 0u)           ; not a binding: one copy per invocation
