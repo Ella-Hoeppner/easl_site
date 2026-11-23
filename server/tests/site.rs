@@ -178,6 +178,23 @@ async fn header_shows_who_is_signed_in() {
 }
 
 #[tokio::test]
+async fn rules_and_privacy() {
+  let app = TestApp::new().await;
+  // One page on the editor host holds both, linked from every app page's
+  // header and from the editor's bar.
+  let page = app.client().get("/rules").await.page();
+  // Its prose is markdown (templates/rules.md), rendered as HTML.
+  assert!(page.contains("<h2>Rules</h2>"));
+  assert!(page.contains("<h2>Privacy</h2>"));
+  assert!(!page.contains("## "));
+  assert!(page.contains("mailto:contact@easl-lang.org"));
+  let explore = app.client().get("/").await.page();
+  assert!(explore.contains("href=\"/rules\""));
+  let editor = app.client().get("/new").await.page();
+  assert!(editor.contains("href=\"/rules\""));
+}
+
+#[tokio::test]
 async fn editor_pages() {
   let app = TestApp::new().await;
   let mut client = app.client();

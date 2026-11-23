@@ -7,6 +7,9 @@
 //!
 //! - `static(path)`: the versioned URL of an app asset (`/static/app.css?v=…`)
 //! - `value|rich`: plain user text as HTML (escaped, line breaks, links)
+//! - `{% filter markdown %}…{% endfilter %}`: the site's own markdown (like
+//!   `rules.md`, included that way) as HTML. Not for user text: it passes
+//!   raw HTML through
 //! - `timestamp|date` ("March 4, 2026"), `|month` ("March 2026"), `|ago`
 //!   ("3 days ago")
 
@@ -15,6 +18,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use minijinja::{Environment, Value, path_loader};
+use pulldown_cmark::{Options, Parser, html::push_html};
 
 use crate::assets::Assets;
 use crate::db::now;
@@ -25,6 +29,8 @@ const TEMPLATES: &[(&str, &str)] = &[
   ("base.html", include_str!("../templates/base.html")),
   ("macros.html", include_str!("../templates/macros.html")),
   ("explore.html", include_str!("../templates/explore.html")),
+  ("rules.html", include_str!("../templates/rules.html")),
+  ("rules.md", include_str!("../templates/rules.md")),
   ("profile.html", include_str!("../templates/profile.html")),
   ("playlist.html", include_str!("../templates/playlist.html")),
   (
@@ -102,6 +108,11 @@ fn environment(assets: Arc<Assets>) -> Environment<'static> {
   env.add_function("static", move |path: String| assets.url(&path));
   env.add_filter("rich", |text: String| {
     Value::from_safe_string(rich_text(&text))
+  });
+  env.add_filter("markdown", |source: String| {
+    let mut html = String::new();
+    push_html(&mut html, Parser::new_ext(&source, Options::ENABLE_TABLES));
+    Value::from_safe_string(html)
   });
   env.add_filter("date", |timestamp: i64| format_date(timestamp));
   env.add_filter("month", |timestamp: i64| format_month(timestamp));

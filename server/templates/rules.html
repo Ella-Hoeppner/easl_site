@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Rules & privacy — easl{% endblock %}
+{% block description %}The easl editor's rules, and what it stores about you.{% endblock %}
+{% block page_class %} medium{% endblock %}
+{% block content %}
+<article class="prose">
+{# The page's prose is in rules.md. #}
+{% filter markdown %}{% include "rules.md" %}{% endfilter %}
+<p class="contact">Contact: <a href="mailto:contact@easl-lang.org">contact@easl-lang.org</a></p>
+</article>
+{% endblock %}

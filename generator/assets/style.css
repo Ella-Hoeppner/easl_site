@@ -132,6 +132,26 @@ body {
   font-weight: 600;
 }
 
+/* The link to the online editor, after the docs' sections. */
+.nav-editor {
+  margin-top: 1.3rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.nav-editor a {
+  display: block;
+  padding: 0.22rem 0.55rem;
+  border-radius: 6px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.nav-editor a:hover {
+  background: var(--accent-soft);
+}
+
 .sidebar ul.toc {
   margin: 0.15rem 0 0.4rem;
   padding-left: 0.9rem;

@@ -15,6 +15,7 @@ mod explore;
 mod images;
 mod playlist;
 mod profile;
+mod rules;
 mod settings;
 
 use axum::Router;
@@ -89,6 +90,7 @@ pub fn router() -> Router<AppState> {
       get(playlist::new_form).post(playlist::create),
     )
     .route("/new", get(editor::new_sketch))
+    .route("/rules", get(rules::rules))
     .route("/login", get(account::login_form).post(account::login))
     .route("/signup", get(account::signup_form).post(account::signup))
     .route("/logout", post(account::logout))

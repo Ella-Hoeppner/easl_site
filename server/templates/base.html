@@ -16,6 +16,7 @@
     <a href="{{ app_base }}/"{% if not app_base and (path == "/" or path is startingwith("/?")) %} aria-current="page"{% endif %}>Explore</a>
     <a class="nav-new" href="{{ app_base }}/new">New sketch</a>
     <a href="{{ docs_origin }}/guide.html">Docs</a>
+    <a href="{{ app_base }}/rules"{% if not app_base and path == "/rules" %} aria-current="page"{% endif %}>Rules &amp; privacy</a>
   </nav>
   <div class="account">
     {% if me %}
@@ -52,6 +53,8 @@
   <a href="{{ docs_origin }}/guide.html">Docs</a>
   <a href="{{ app_base }}/">Explore</a>
   <a href="{{ app_base }}/new">New sketch</a>
+  <a href="{{ app_base }}/rules">Rules &amp; privacy</a>
+  <a href="mailto:contact@easl-lang.org">contact@easl-lang.org</a>
 </footer>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>

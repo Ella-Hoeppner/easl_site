@@ -569,12 +569,11 @@ fn wrap_in_template(
       ""
     },
   ));
-  // the editor's links close the sidebar, after the docs themselves
+  // the link to the online editor (its Explore page) closes the sidebar,
+  // after the docs themselves
   let editor = editor::editor_origin();
   nav.push_str(&format!(
-    "<h2 class=\"nav-section\">Editor</h2>\n<ul>\n\
-     <li><a href=\"{editor}/new\">Blank sketch</a></li>\n\
-     <li><a href=\"{editor}/\">Explore sketches</a></li>\n</ul>\n"
+    "<div class=\"nav-editor\"><a href=\"{editor}/\">Editor</a></div>\n"
   ));
 
   let full_title = if title.eq_ignore_ascii_case("easl") {

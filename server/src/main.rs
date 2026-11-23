@@ -194,10 +194,12 @@ async fn serve(
     sync_at_startup(&pool, &config.site_dir, owner).await;
   }
   let state = AppState::new(config.clone(), pool.clone(), mailer(config.dev)?)?;
+  let cleanup_state = state.clone();
   tokio::spawn(async move {
     let mut interval = time::interval(CLEANUP_INTERVAL);
     loop {
       interval.tick().await;
+      cleanup_state.limiter.forget_expired();
       if let Err(error) = auth::delete_expired(&pool).await {
         tracing::error!("deleting expired sessions: {error}");
       }

@@ -64,6 +64,15 @@ impl RateLimiter {
     Self::default()
   }
 
+  /// Drops every entry with no event inside its window, so a key (often a
+  /// client's address) is kept only while a limit needs it. The server calls
+  /// this hourly; checks also sweep every [`SWEEP_INTERVAL`] calls.
+  pub fn forget_expired(&self) {
+    if let Ok(mut state) = self.state.lock() {
+      sweep(&mut state.windows, Instant::now());
+    }
+  }
+
   /// Records an event for `(action, key)` if `limit` allows it, returning
   /// whether it did.
   pub fn allow(&self, action: Action, key: &str, limit: Limit) -> bool {
@@ -160,6 +169,27 @@ fn sweep(windows: &mut HashMap<(Action, String), Window>, now: Instant) {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn forgetting_expired_entries() {
+    let limiter = RateLimiter::new();
+    let expired = Limit::new(1, 0);
+    let current = Limit::new(1, 60 * 60);
+    assert!(limiter.allow(Action::View, "gone", expired));
+    assert!(limiter.allow(Action::View, "kept", current));
+    limiter.forget_expired();
+    let state = limiter.state.lock().unwrap();
+    assert!(
+      !state
+        .windows
+        .contains_key(&(Action::View, "gone".to_string()))
+    );
+    assert!(
+      state
+        .windows
+        .contains_key(&(Action::View, "kept".to_string()))
+    );
+  }
 
   #[test]
   fn limits_per_action_and_key() {
