@@ -1,5 +1,5 @@
-//! The `easl-site-server` command: `serve`, `sync-examples`, `seed`, and
-//! `admin`.
+//! The `easl-site-server` command: `serve`, `sync-examples`, `seed`,
+//! `admin`, and `visits`.
 
 use std::env;
 use std::future;
@@ -28,7 +28,9 @@ use easl_site_server::outbox;
 use easl_site_server::seed;
 use easl_site_server::site;
 use easl_site_server::state::AppState;
+use easl_site_server::text::format_date;
 use easl_site_server::users;
+use easl_site_server::visits;
 
 #[derive(Parser)]
 #[command(name = "easl-site-server", about = "The easl site's server")]
@@ -75,6 +77,10 @@ enum Command {
     /// the check off).
     #[arg(long, default_value = "2G", value_parser = parse_size)]
     min_free_disk: u64,
+    /// The GeoIP database (DB-IP's IP to Country Lite, .mmdb) to look up
+    /// visitors' countries in; it's read again when the file changes.
+    #[arg(long)]
+    geoip_db: Option<PathBuf>,
   },
   /// Makes the site's examples (editor/examples.json) public sketches owned
   /// by a user, creating or updating them.
@@ -102,6 +108,15 @@ enum Command {
     #[arg(long, default_value = "./data/easl-site.db", global = true)]
     db: PathBuf,
   },
+  /// Prints the visit counts: page views and unique visitors by day and by
+  /// country.
+  Visits {
+    /// How many days back to count, today included (UTC).
+    #[arg(long, default_value_t = 30)]
+    days: i64,
+    #[arg(long, default_value = "./data/easl-site.db")]
+    db: PathBuf,
+  },
 }
 
 #[derive(Subcommand)]
@@ -112,7 +127,9 @@ enum AdminAction {
   Revoke { username: String },
 }
 
-/// How often expired sessions and email tokens are deleted.
+/// How often expired sessions and email tokens are deleted, the visitor
+/// salt of a past day is dropped, and the GeoIP database is checked for
+/// changes.
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 #[tokio::main]
@@ -134,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
       trust_proxy,
       sync_examples_owner,
       min_free_disk,
+      geoip_db,
     } => {
       let port = bind.port();
       let editor_origin = editor_origin
@@ -143,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
       let mut config = Config::new(site_dir, &editor_origin, &docs_origin, dev);
       config.trust_proxy = trust_proxy;
       config.min_free_disk = min_free_disk;
+      config.geoip_db = geoip_db;
       config.data_dir = match db.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
         _ => PathBuf::from("."),
@@ -156,6 +175,7 @@ async fn main() -> anyhow::Result<()> {
     } => sync_examples(&db, &site_dir, &owner).await,
     Command::Seed { db, site_dir } => seed::run(&db, &site_dir).await,
     Command::Admin { action, db } => admin(&db, action).await,
+    Command::Visits { days, db } => print_visits(&db, days).await,
   }
 }
 
@@ -200,6 +220,8 @@ async fn serve(
     loop {
       interval.tick().await;
       cleanup_state.limiter.forget_expired();
+      cleanup_state.visits.forget_old_salt();
+      cleanup_state.visits.reload_geoip();
       if let Err(error) = auth::delete_expired(&pool).await {
         tracing::error!("deleting expired sessions: {error}");
       }
@@ -316,5 +338,44 @@ async fn admin(db: &Path, action: AdminAction) -> anyhow::Result<()> {
     (false, false) => "wasn't",
   };
   println!("{username} {state} an admin.");
+  Ok(())
+}
+
+/// `visits`: prints the last `days` days' page views and unique visitors,
+/// by day and by country.
+async fn print_visits(db: &Path, days: i64) -> anyhow::Result<()> {
+  const DAY: i64 = 24 * 60 * 60;
+  let pool = db::open(db).await?;
+  let since = (db::now() / DAY - days.max(1) + 1) * DAY;
+  let by_day = visits::by_day(&pool, since).await?;
+  if by_day.is_empty() {
+    println!("No visits in the last {days} days.");
+    return Ok(());
+  }
+  println!("Page views and unique visitors in the last {days} days (UTC):\n");
+  println!(
+    "{:<20} {:>8} {:>9} {:>8} {:>8}",
+    "day", "views", "visitors", "docs", "editor"
+  );
+  for day in &by_day {
+    println!(
+      "{:<20} {:>8} {:>9} {:>8} {:>8}",
+      format_date(day.day),
+      day.visits,
+      day.visitors,
+      day.docs_visits,
+      day.editor_visits
+    );
+  }
+  println!("\nBy country (a visitor counts once a day):\n");
+  println!("{:<20} {:>8} {:>9}", "country", "views", "visitors");
+  for country in visits::by_country(&pool, since).await? {
+    println!(
+      "{:<20} {:>8} {:>9}",
+      country.country.as_deref().unwrap_or("unknown"),
+      country.visits,
+      country.visitors
+    );
+  }
   Ok(())
 }

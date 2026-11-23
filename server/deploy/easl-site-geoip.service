@@ -1,0 +1,8 @@
+[Unit]
+Description=Update the easl site's GeoIP database
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/easl-site-geoip

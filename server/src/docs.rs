@@ -1,5 +1,5 @@
 //! The docs host: the static site, with redirects to the editor host for
-//! the old playground and for the app's paths.
+//! the old playground and for the app's paths, and the pages' visit beacon.
 //!
 //! In production a static file server serves the docs itself; serving them
 //! here too keeps development to one process.
@@ -13,6 +13,7 @@ use serde::Deserialize;
 
 use crate::site;
 use crate::state::AppState;
+use crate::visits::{self, Site, VISIT_PATH};
 
 /// The first path segments of the app's pages and API, which the docs host
 /// redirects to the same path on the editor host.
@@ -39,6 +40,7 @@ pub fn router(state: AppState) -> Router {
   Router::new()
     .route("/playground", get(playground))
     .route("/playground.html", get(playground))
+    .route(VISIT_PATH, visits::route(Site::Docs))
     .fallback_service(site::files(&state, state.config.site_dir.clone()))
     .layer(middleware::from_fn_with_state(
       state.clone(),

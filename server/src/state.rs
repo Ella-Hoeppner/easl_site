@@ -15,6 +15,7 @@ use crate::ratelimit::RateLimiter;
 use crate::site::SiteFiles;
 use crate::templates::Templates;
 use crate::tokens::new_token;
+use crate::visits::Visits;
 
 /// How many passwords may be hashed at once.
 const CONCURRENT_HASHES: usize = 2;
@@ -36,6 +37,8 @@ pub struct Shared {
   pub disk: DiskGuard,
   /// Bounds concurrent password hashing (each takes ~19 MB of memory).
   pub hashing: Semaphore,
+  /// Today's visitor-hash salt and the GeoIP database.
+  pub visits: Visits,
   /// A hash of a random password, checked when a sign-in names no
   /// account.
   pub dummy_password_hash: String,
@@ -59,6 +62,7 @@ impl AppState {
       limiter: RateLimiter::new(),
       disk: DiskGuard::new(config.data_dir.clone(), config.min_free_disk),
       hashing: Semaphore::new(CONCURRENT_HASHES),
+      visits: Visits::new(config.geoip_db.clone()),
       dummy_password_hash: hash_password_blocking(&new_token())?,
       config,
     })))

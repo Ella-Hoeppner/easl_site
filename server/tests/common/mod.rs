@@ -49,6 +49,7 @@ pub fn relaxed_limits() -> RateLimits {
     sketch_creates: [generous; 2],
     playlist_creates: generous,
     reports: generous,
+    visits: generous,
   }
 }
 

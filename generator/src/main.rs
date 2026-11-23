@@ -142,6 +142,8 @@ fn main() {
     include_str!("../assets/live-previews.js"),
   )
   .unwrap();
+  fs::write(site_dir.join("visit.js"), include_str!("../assets/visit.js"))
+    .unwrap();
 
   let index_body = function_index_body(&fn_entries);
   let index_html = wrap_in_template(
@@ -589,6 +591,7 @@ fn wrap_in_template(
      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
      <title>{title}</title>\n\
      <link rel=\"stylesheet\" href=\"{prefix}style.css\">\n\
+     <script src=\"{prefix}visit.js\" async></script>\n\
      </head>\n\
      <body>\n\
      <nav class=\"sidebar\">\n\

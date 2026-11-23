@@ -29,6 +29,11 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     "text/javascript; charset=utf-8",
     include_bytes!("../static/app.js"),
   ),
+  (
+    "visit.js",
+    "text/javascript; charset=utf-8",
+    include_bytes!("../static/visit.js"),
+  ),
 ];
 
 /// The directory dev mode reads assets from.

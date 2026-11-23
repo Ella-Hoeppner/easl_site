@@ -27,6 +27,7 @@ use crate::security::csrf_guard;
 use crate::site::{self, EDITOR_DIR};
 use crate::state::AppState;
 use crate::validate::MAX_BODY_BYTES;
+use crate::visits::{self, Site, VISIT_PATH};
 
 /// The web runtime's directory in the site, served on the editor host too.
 const RUNTIME_DIR: &str = "easl-web";
@@ -84,8 +85,9 @@ fn request_host(request: &Request) -> &str {
 }
 
 /// The editor host: the API and the pages (with the explore page at `/`),
-/// the app's assets at `/static/…`, and from the site directory only the
-/// editor's files (`/editor/…`) and the web runtime (`/easl-web/…`).
+/// the app's assets at `/static/…`, the pages' visit beacon (`/visit`), and
+/// from the site directory only the editor's files (`/editor/…`) and the
+/// web runtime (`/easl-web/…`).
 ///
 /// Dynamic routes (the API and the pages, and the 404 page for anything
 /// else) resolve the session, render error pages, and are never cached.
@@ -102,6 +104,7 @@ fn editor_router(state: AppState) -> Router {
       HeaderValue::from_static("no-store"),
     ))
     .route("/static/{*path}", get(assets::serve))
+    .route(VISIT_PATH, visits::route(Site::Editor))
     .nest_service(
       &format!("/{EDITOR_DIR}"),
       site::files(&state, site_dir.join(EDITOR_DIR)),

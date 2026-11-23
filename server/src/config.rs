@@ -41,6 +41,10 @@ pub struct Config {
   /// for the site to store sketch content or thumbnails (0 turns the guard
   /// off).
   pub min_free_disk: u64,
+  /// The GeoIP database (DB-IP's IP to Country Lite, in MaxMind's format)
+  /// that visits' countries are looked up in; without it, visits are
+  /// recorded with no country. See [`crate::visits`].
+  pub geoip_db: Option<PathBuf>,
 }
 
 impl Config {
@@ -63,6 +67,7 @@ impl Config {
       daily_email_budget: DAILY_EMAIL_BUDGET,
       data_dir: PathBuf::from("."),
       min_free_disk: MIN_FREE_DISK_BYTES,
+      geoip_db: None,
     }
   }
 
@@ -178,6 +183,9 @@ pub struct RateLimits {
   pub playlist_creates: Limit,
   /// Reports filed, per user.
   pub reports: Limit,
+  /// Page views recorded, per client address; past it, views go
+  /// uncounted.
+  pub visits: Limit,
 }
 
 impl Default for RateLimits {
@@ -193,6 +201,7 @@ impl Default for RateLimits {
       sketch_creates: [Limit::new(30, HOUR), Limit::new(100, DAY)],
       playlist_creates: Limit::new(20, HOUR),
       reports: Limit::new(10, HOUR),
+      visits: Limit::new(300, HOUR),
     }
   }
 }

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Downloads DB-IP's free IP to Country Lite database (CC BY 4.0,
+# https://db-ip.com/db/download/ip-to-country-lite), which the server looks
+# visitors' countries up in, and installs it where the service reads it
+# (--geoip-db). DB-IP publishes a new one early each month; when this
+# month's isn't out yet, it takes last month's. The server notices the new
+# file within the hour. Installed as /usr/local/sbin/easl-site-geoip and
+# run monthly by easl-site-geoip.timer; see server/README.md, "Visits".
+set -eu
+DEST="${EASL_SITE_GEOIP_DB:-/var/lib/easl-site/dbip-country-lite.mmdb}"
+
+year=$(date -u +%Y)
+month=$(date -u +%m)
+month=${month#0}
+if [ "$month" -eq 1 ]; then
+  last=$(printf '%04d-12' $((year - 1)))
+else
+  last=$(printf '%04d-%02d' "$year" $((month - 1)))
+fi
+this=$(printf '%04d-%02d' "$year" "$month")
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+for edition in "$this" "$last"; do
+  url="https://download.db-ip.com/free/dbip-country-lite-$edition.mmdb.gz"
+  if curl -fsSL -o "$tmp/db.mmdb.gz" "$url"; then
+    gunzip "$tmp/db.mmdb.gz"
+    # A partial or empty download shouldn't replace a good database.
+    if [ "$(wc -c < "$tmp/db.mmdb")" -lt 1000000 ]; then
+      echo "the $edition database is suspiciously small; keeping the old one" >&2
+      exit 1
+    fi
+    cp "$tmp/db.mmdb" "$DEST.partial"
+    chmod 644 "$DEST.partial"
+    mv "$DEST.partial" "$DEST"
+    echo "installed DB-IP's $edition country database as $DEST"
+    exit 0
+  fi
+done
+echo "couldn't download DB-IP's $this or $last country database" >&2
+exit 1

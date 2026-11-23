@@ -34,3 +34,4 @@ pub mod tokens;
 pub mod users;
 pub mod validate;
 pub mod visibility;
+pub mod visits;

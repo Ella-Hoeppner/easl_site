@@ -670,3 +670,93 @@ async fn oversized_bodies_are_refused() {
     .await;
   assert_eq!(response.status, StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+/// A page's visit beacon, from a browser at `ip` on a page at `origin`.
+fn beacon(origin: &str, ip: &str, user_agent: &str) -> Request<Body> {
+  Request::builder()
+    .method(Method::POST)
+    .uri("/visit")
+    .header("origin", origin)
+    .header("x-forwarded-for", ip)
+    .header("user-agent", user_agent)
+    .body(Body::empty())
+    .expect("request")
+}
+
+const BROWSER: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0";
+
+/// The recorded visits' sites, countries, and visitor hashes, oldest first.
+async fn visits(app: &TestApp) -> Vec<(String, Option<String>, String)> {
+  sqlx::query_as("SELECT site, country, visitor FROM visits ORDER BY id")
+    .fetch_all(&app.state.db)
+    .await
+    .expect("visits")
+}
+
+#[tokio::test]
+async fn visits_are_counted_without_addresses() {
+  let app = TestApp::with_config(|config| config.trust_proxy = true).await;
+  let mut docs = app.docs_client();
+  let mut editor = app.client();
+  // Every app page sends the beacon.
+  for path in ["/", "/new"] {
+    let page = editor.get(path).await.page();
+    assert!(page.contains("/static/visit.js?v="), "{path}");
+  }
+  assert_eq!(editor.get("/static/visit.js").await.status, StatusCode::OK);
+  for _ in 0..2 {
+    let response = docs.send(beacon(DOCS_ORIGIN, "1.2.3.4", BROWSER)).await;
+    assert_eq!(response.status, StatusCode::NO_CONTENT);
+  }
+  editor.send(beacon(ORIGIN, "1.2.3.4", BROWSER)).await;
+  docs.send(beacon(DOCS_ORIGIN, "5.6.7.8", BROWSER)).await;
+  // Ignored, though answered the same: another site's page, a crawler, no
+  // user agent, and no origin.
+  for request in [
+    beacon("https://elsewhere.example", "1.2.3.4", BROWSER),
+    beacon(
+      DOCS_ORIGIN,
+      "1.2.3.4",
+      "Mozilla/5.0 (compatible; Googlebot/2.1)",
+    ),
+    beacon(DOCS_ORIGIN, "1.2.3.4", ""),
+    Request::builder()
+      .method(Method::POST)
+      .uri("/visit")
+      .header("user-agent", BROWSER)
+      .body(Body::empty())
+      .expect("request"),
+  ] {
+    let response = docs.send(request).await;
+    assert_eq!(response.status, StatusCode::NO_CONTENT);
+  }
+  let visits = visits(&app).await;
+  let sites: Vec<&str> =
+    visits.iter().map(|(site, ..)| site.as_str()).collect();
+  assert_eq!(sites, ["docs", "docs", "editor", "docs"]);
+  // No GeoIP database is configured, so there are no countries.
+  assert!(visits.iter().all(|(_, country, _)| country.is_none()));
+  // One visitor across both sites, another at another address.
+  let hashes: Vec<&str> =
+    visits.iter().map(|(.., hash)| hash.as_str()).collect();
+  assert!(hashes.iter().all(|hash| hash.len() == 16));
+  assert_eq!(hashes[0], hashes[1]);
+  assert_eq!(hashes[0], hashes[2]);
+  assert_ne!(hashes[0], hashes[3]);
+}
+
+#[tokio::test]
+async fn visits_are_limited_per_address() {
+  let app = TestApp::with_config(|config| {
+    config.trust_proxy = true;
+    config.limits.visits = Limit::new(2, 3600);
+  })
+  .await;
+  let mut docs = app.docs_client();
+  for _ in 0..3 {
+    let response = docs.send(beacon(DOCS_ORIGIN, "1.2.3.4", BROWSER)).await;
+    assert_eq!(response.status, StatusCode::NO_CONTENT);
+  }
+  docs.send(beacon(DOCS_ORIGIN, "5.6.7.8", BROWSER)).await;
+  assert_eq!(visits(&app).await.len(), 3);
+}

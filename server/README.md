@@ -34,10 +34,11 @@ Tests: `cargo test` (integration tests in `tests/` run the real router against a
 easl-site-server serve         [--bind 127.0.0.1:8000] [--site-dir ../site] [--db ./data/easl-site.db]
                                [--editor-origin http://editor.localhost:<port>] [--docs-origin http://localhost:<port>]
                                [--sync-examples-owner <username>] [--dev] [--trust-proxy]
-                               [--min-free-disk 2G]
+                               [--min-free-disk 2G] [--geoip-db <path>]
 easl-site-server sync-examples [--owner ella] [--db …] [--site-dir …]
 easl-site-server seed          [--db …] [--site-dir …]
 easl-site-server admin grant|revoke <username> [--db …]
+easl-site-server visits        [--days 30] [--db …]
 ```
 
 - `--editor-origin` is the app's public origin (`https://editor.easl-lang.org`). Its hostname decides which requests get the app, and it's used for absolute links (emails, link previews, redirects from the docs) and the CSRF check, so it must match what browsers see. It defaults to `http://editor.localhost:<bind port>`.
@@ -45,9 +46,10 @@ easl-site-server admin grant|revoke <username> [--db …]
 - `--sync-examples-owner ella` runs the examples sync (below) at startup when that user exists, logging and carrying on otherwise (no such user, no `editor/examples.json`, a conflict), so each deploy of a rebuilt site keeps the examples current.
 - `--trust-proxy` takes the client address (for rate limiting) from the last hop of `X-Forwarded-For`, which Caddy appends. Only set it behind a proxy, or clients can pick their own address.
 - `--min-free-disk` (default `2G`; a number of bytes with an optional `K`/`M`/`G`/`T` unit, binary; `0` turns it off) is the free space the database's filesystem must keep: below it, the server refuses to store sketch content (see "Free disk").
+- `--geoip-db` is the GeoIP database visits' countries are looked up in (see "Visits"); without it, visits are recorded with no country.
 - `SMTP_URL` (e.g. `smtps://user:pass@smtp.example.com:465`) and `MAIL_FROM` (e.g. `easl <noreply@easl-lang.org>`) enable email. Without them, emails are logged, with a warning at startup outside dev.
 - `RUST_LOG` sets log levels (default `info,tower_http=info,sqlx=warn`).
-- The database is created and migrated (`migrations/`) on startup. Expired sessions and email tokens, and daily email counts older than 30 days, are deleted hourly.
+- The database is created and migrated (`migrations/`) on startup. Expired sessions and email tokens, and daily email counts older than 30 days, are deleted hourly; the same hourly upkeep drops a past day's visitor salt and rereads the GeoIP database if its file changed.
 
 The editor pages read the editor build's versions from `<site-dir>/editor/manifest.json` (`{"version", "monaco_version"}`; the page loads Monaco from the site's `/editor/monaco/<monaco_version>/`), and the docs' playground redirects read `<site-dir>/editor/examples.json`; both are re-read when the file changes, so a site rebuild needs no restart. Templates and app assets are compiled into the binary in release builds, so deploying the server means deploying one file.
 
@@ -69,6 +71,7 @@ The docs' example programs are ordinary public sketches owned by `ella` (Ella's 
 | `src/ratelimit.rs` | in-memory sliding-window limits (see "Limits") |
 | `src/outbox.rs` | sending email within the site's daily budget |
 | `src/disk.rs` | the free-disk guard |
+| `src/visits.rs` | counting page views (see "Visits") |
 | `src/users.rs`, `sketches.rs`, `playlists.rs`, `comments.rs`, `reports.rs` | the data layer and the API's JSON shapes |
 | `src/moderation.rs` | admin actions and the moderation log, and the admin pages' lists |
 | `src/revisions.rs` | sketch revisions: the saved versions of a sketch's program, and pruning them to the history budget |
@@ -152,6 +155,7 @@ Every list but the open reports pages by 50. Usernames on the admin pages link t
 | Playlists created (API and form) | account | 20 per hour |
 | Comments | account | 10 per minute |
 | Reports | account | 10 per hour |
+| Page views recorded (see "Visits") | address | 300 per hour; past it, views go uncounted (silently) |
 
 **Email.** Resend's free tier sends 100 emails a day, so the site sends at most 80 a day (`config::DAILY_EMAIL_BUDGET`, `Config::daily_email_budget`; UTC days), leaving room for test emails. Every email goes through `outbox::send`, which counts it in the database (`email_days`, one row per day), so a restart doesn't reset the count; with the day's budget spent it sends nothing, logs a warning, and the user sees "We can't send email right now. Please try again later." (503):
 
@@ -163,11 +167,27 @@ Every list but the open reports pages by 50. Usernames on the admin pages link t
 
 **Password-reset links.** Only the newest works: asking for a reset deletes the account's earlier reset tokens. Changing the password in settings deletes them too, in the transaction that changes the hash (and ends the other sessions), as using a reset link and changing the email already did.
 
+### Visits
+
+The server counts page views on both hosts (`src/visits.rs`, `migrations/0006_visits.sql`), to show how much the site is used and from where in the world. Every page loads `visit.js` (the app's `static/visit.js`, and the docs' `generator/assets/visit.js`, which the generator copies into the site and every docs page loads), which sends `POST /visit` with `navigator.sendBeacon`. Only browsers that run the page's scripts send it, which leaves out most crawlers. A beacon is recorded, as one row of `visits`, when its `Origin` is one of the site's (the docs origin, or one the app accepts), its user agent is present and has none of `bot`, `crawl`, `spider`, `slurp`, or `headless` in it, its address is within its limit (300 an hour), and the free-disk guard allows writes. Whether it's recorded or not, the answer is 204. The CSRF check lets `/visit` through, since the docs pages send it from the docs origin, which the check doesn't accept.
+
+A row holds:
+
+- `at` (unix seconds) and `site` (`docs` or `editor`);
+- `country`: the address's ISO 3166-1 code from the GeoIP database, NULL without one or when it doesn't know the address (such as local addresses in development);
+- `visitor`: the first 8 bytes, in hex, of a SHA-256 of a salt, the address, and the user agent. The salt is 32 random bytes kept only in memory and replaced each UTC day (the hourly upkeep drops a past day's), so a browser has one hash a day across both hosts. Once the day is over, its hashes can't be tied to an address, or to the same browser on another day.
+
+The address itself is never written anywhere. A restart makes a new salt, so a visitor seen both before and after a restart counts twice that day. Rows (about 60 bytes each) are kept indefinitely.
+
+`easl-site-server visits [--days 30]` prints the views and unique visitors by day (with each host's views) and by country, where a visitor counts once a day; on the machine, `sudo -u easl easl-site-server visits --db /var/lib/easl-site/easl-site.db`.
+
+**The GeoIP database** is DB-IP's free [IP to Country Lite](https://db-ip.com/db/download/ip-to-country-lite) in MaxMind's `.mmdb` format, about 8.5 MB, read into memory (`--geoip-db`; the server rereads it within an hour of the file changing). It's licensed CC BY 4.0, so showing its data publicly (a map of visitors, say) needs DB-IP's attribution: "IP Geolocation by DB-IP", linking to https://db-ip.com. To try countries in development, download it (`EASL_SITE_GEOIP_DB=./data/dbip-country-lite.mmdb deploy/easl-site-geoip`) and pass `--geoip-db ./data/dbip-country-lite.mmdb` with `--trust-proxy`, sending beacons with an `X-Forwarded-For` address, since local addresses have no country.
+
 ### Routes
 
-On the editor host — pages: `/` (explore: `?sort=new|popular|trending&q=&tag=&page=`; `/explore` redirects there with its query), `/u/<username>` (`?tab=sketches|playlists|likes&page=`), `/u/<username>/avatar.svg`, `/p/<id>`, `/playlists/new` (the form; it posts back to itself and goes to the new playlist), `/s/<id>` (`?playlist=`), `/s/<id>/thumb`, `/new`, `/login`, `/signup`, `POST /logout`, `/forgot`, `/reset/<token>`, `/verify/<token>`, `/settings` (forms post to `/settings/profile|email|password|verification|delete`), `/admin` (`?tab=reports|banned|hidden|comments|log&resolved=1&page=`), `/admin/users/<username>` (`?list=submitted|against|actions|comments&page=`). Files: `/static/…` (the app's assets), and from the site directory only `/editor/…` and `/easl-web/…` (`?v=` URLs cached for a year, others revalidated). Anything else is a 404.
+On the editor host — pages: `/` (explore: `?sort=new|popular|trending&q=&tag=&page=`; `/explore` redirects there with its query), `/u/<username>` (`?tab=sketches|playlists|likes&page=`), `/u/<username>/avatar.svg`, `/p/<id>`, `/playlists/new` (the form; it posts back to itself and goes to the new playlist), `/s/<id>` (`?playlist=`), `/s/<id>/thumb`, `/new`, `/login`, `/signup`, `POST /logout`, `/forgot`, `/reset/<token>`, `/verify/<token>`, `/settings` (forms post to `/settings/profile|email|password|verification|delete`), `/admin` (`?tab=reports|banned|hidden|comments|log&resolved=1&page=`), `/admin/users/<username>` (`?list=submitted|against|actions|comments&page=`). `POST /visit` (the visit beacon). Files: `/static/…` (the app's assets), and from the site directory only `/editor/…` and `/easl-web/…` (`?v=` URLs cached for a year, others revalidated). Anything else is a 404.
 
-On the docs host: `/playground` and `/playground.html` redirect (308) to `<editor-origin>/s/<sketch id>` for a known `?example=<id>`, else to `<editor-origin>/new`; paths whose first segment is one of the app's (`explore`, `new`, `s`, `u`, `p`, `playlists`, `login`, `signup`, `logout`, `forgot`, `reset`, `verify`, `settings`, `admin`, `api`) redirect (308) to the same path and query on the editor host. Everything else is the static site.
+On the docs host: `/playground` and `/playground.html` redirect (308) to `<editor-origin>/s/<sketch id>` for a known `?example=<id>`, else to `<editor-origin>/new`; paths whose first segment is one of the app's (`explore`, `new`, `s`, `u`, `p`, `playlists`, `login`, `signup`, `logout`, `forgot`, `reset`, `verify`, `settings`, `admin`, `api`) redirect (308) to the same path and query on the editor host. `POST /visit` is the visit beacon. Everything else is the static site.
 
 API (`/api`): `GET me`, `GET me/sketches`, `GET me/playlists`; `POST sketches`; `GET|PUT|DELETE sketches/<id>` (`PUT` takes any of `title`, `description`, `files`, `entry_file`, `entry_name`, `visibility`, `tags`); `POST sketches/<id>/publish`, `POST sketches/<id>/discard-draft` (owner); `GET sketches/<id>/published` (`{revision, files, entry_file, entry_name, published_at}`, 404 when nothing is published); `GET sketches/<id>/revisions` (owner; `{revisions: [{number, created_at, published, head}]}`, newest first); `POST sketches/<id>/fork`; `PUT sketches/<id>/thumbnail`; `POST|DELETE sketches/<id>/like`; `GET|POST sketches/<id>/comments`; `DELETE comments/<id>`; `POST playlists`; `GET|PUT|DELETE playlists/<id>`; `POST playlists/<id>/items`; `DELETE playlists/<id>/items/<sketch_id>`; `PUT playlists/<id>/order`; `POST reports`; `POST admin/sketches/<id>/hide|unhide`, `admin/users/<username>/ban|unban`, `admin/reports/<id>/resolve`, `admin/comments/<id>/restore`. Errors are `{"error": "…"}` with 400/401/403/404/409/413/429/503/507.
 
@@ -175,13 +195,13 @@ API (`/api`): `GET me`, `GET me/sketches`, `GET me/playlists`; `POST sketches`; 
 
 Two hostnames, one machine: Caddy serves `easl-lang.org` (the docs) from files, and reverse-proxies `editor.easl-lang.org` to this server. DNS needs a record for `editor` pointing at the same machine as the apex: an `A` (and `AAAA`, if the apex has one) record for `editor.easl-lang.org` with the same addresses, or a `CNAME` from `editor` to `easl-lang.org`. Caddy gets the new name's certificate by itself once the record resolves.
 
-The files for the machine are in `deploy/`: the service (`easl-site.service`), Caddy's config (`Caddyfile`), the backup job (see "Backups"), and `easl-site-mail-test`, which sends a test email with the server's settings. The repo's `deploy.sh` deploys through the `easl-site` SSH host: `./deploy.sh site` builds the docs from scratch and uploads them to `/srv/easl-site` (as the `deploy` user); `./deploy.sh server` uploads this directory's source to `~deploy/easl-site-server`, builds it there (`cargo build --release --locked`, a couple of minutes), installs `/usr/local/bin/easl-site-server`, and restarts the service if it's enabled; `./deploy.sh` does both, site first (the server syncs the examples from it when it starts). Templates and app assets are compiled into the binary, so the server is one file.
+The files for the machine are in `deploy/`: the service (`easl-site.service`), Caddy's config (`Caddyfile`), the backup job (see "Backups"), the GeoIP database's update job (see "The GeoIP database" below), and `easl-site-mail-test`, which sends a test email with the server's settings. The repo's `deploy.sh` deploys through the `easl-site` SSH host: `./deploy.sh site` builds the docs from scratch and uploads them to `/srv/easl-site` (as the `deploy` user); `./deploy.sh server` uploads this directory's source to `~deploy/easl-site-server`, builds it there (`cargo build --release --locked`, a couple of minutes), installs `/usr/local/bin/easl-site-server`, and restarts the service if it's enabled; `./deploy.sh` does both, site first (the server syncs the examples from it when it starts). Templates and app assets are compiled into the binary, so the server is one file.
 
 The machine (Ubuntu): Caddy from its apt repository; `build-essential`, `pkg-config`, `rsync`, and `sqlite3`; Rust (rustup's minimal profile) for the `deploy` user; a system user `easl` that owns the database in `/var/lib/easl-site/` (systemd makes the directory, `StateDirectory=easl-site`); and `ufw` allowing only SSH (22/tcp), HTTP (80/tcp), and HTTPS (443/tcp and udp), since the server listens on `127.0.0.1:8000` behind Caddy. Memory use is small (tens of MB, plus ~19 MB per concurrent password hash, at most two at once).
 
 `/etc/easl-site.env` (mode 600, root) holds the email settings, `SMTP_URL` and `MAIL_FROM`; email goes out through Resend (`SMTP_URL=smtps://resend:<API key>@smtp.resend.com:465`, `MAIL_FROM=easl <noreply@easl-lang.org>`), whose DNS records (DKIM, the `send` subdomain, and a `_dmarc` record) are in Cloudflare. `easl-site-mail-test you@example.com` checks them. `systemctl enable --now easl-site` starts the server; `journalctl -u easl-site` shows its logs. It shuts down cleanly on SIGTERM.
 
-Caddy (`deploy/Caddyfile`, installed as `/etc/caddy/Caddyfile`; `systemctl reload caddy` after changing it) serves the docs itself and proxies the editor host. The app sets its own cache headers (a year for `?v=` URLs, revalidation otherwise, `no-store` for pages that depend on the session); the docs keep Caddy's rules. On the docs host, Caddy hands the old playground and the app's paths (`@moved`) to the server, which answers them with its docs-host redirects (it maps `?example=<id>` to the example's sketch, so the mapping lives in one place). Caddy passes the original `Host` through, which is how the server tells the two hosts apart: requests proxied from the `easl-lang.org` block arrive as `Host: easl-lang.org` and get the docs host's redirects. Every name is "DNS only" in Cloudflare (not proxied): the server rate-limits by the client's address, which a proxy would replace with its own, and Caddy gets each name's certificate itself. (The app also compresses with gzip/brotli; Caddy leaves already-encoded responses alone.)
+Caddy (`deploy/Caddyfile`, installed as `/etc/caddy/Caddyfile`; `systemctl reload caddy` after changing it) serves the docs itself and proxies the editor host. The app sets its own cache headers (a year for `?v=` URLs, revalidation otherwise, `no-store` for pages that depend on the session); the docs keep Caddy's rules. On the docs host, Caddy hands the visit beacon (`/visit`) to the server, and the old playground and the app's paths (`@moved`), which the server answers with its docs-host redirects (it maps `?example=<id>` to the example's sketch, so the mapping lives in one place). Caddy passes the original `Host` through, which is how the server tells the two hosts apart: requests proxied from the `easl-lang.org` block arrive as `Host: easl-lang.org` and get the docs host's redirects. Every name is "DNS only" in Cloudflare (not proxied): the server rate-limits by the client's address, which a proxy would replace with its own, and Caddy gets each name's certificate itself. (The app also compresses with gzip/brotli; Caddy leaves already-encoded responses alone.)
 
 The examples: with `--sync-examples-owner ella`, each start syncs `editor/examples.json` into ella's sketches (and logs and carries on when ella doesn't exist yet). To sync by hand after a site deploy without restarting: `sudo -u easl easl-site-server sync-examples --db /var/lib/easl-site/easl-site.db --site-dir /srv/easl-site`. Whoever registers `ella` first owns the examples, so Ella signs up as soon as the editor is up.
 
@@ -192,6 +212,19 @@ The examples: with `--sync-examples-owner ella`, each start syncs `editor/exampl
 3. Ella signs up as `ella` at `https://editor.easl-lang.org/signup` and follows the verification email.
 4. On the machine: `sudo -u easl easl-site-server admin grant ella --db /var/lib/easl-site/easl-site.db`, then `systemctl restart easl-site` to sync the examples into her account.
 5. Check: the examples open from the docs, signing up and verifying, saving and publishing a sketch, commenting, liking, reporting, and the moderation page; then `systemctl start easl-site-backup` and check the backup it made.
+
+### The GeoIP database
+
+`deploy/easl-site-geoip` downloads DB-IP's country database (see "Visits") into `/var/lib/easl-site/dbip-country-lite.mmdb`, where the service's `--geoip-db` points, replacing the file only once a whole new one has downloaded; `deploy/easl-site-geoip.timer` runs it on the 5th of each month (DB-IP publishes early in the month; when this month's isn't out, it takes last month's). The server picks the new file up within the hour. Installing it (as root on the server; it needs `curl`):
+
+```sh
+install -m 755 deploy/easl-site-geoip /usr/local/sbin/
+install -m 644 deploy/easl-site-geoip.service deploy/easl-site-geoip.timer /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now easl-site-geoip.timer
+systemctl start easl-site-geoip
+```
+
+Until the file exists, the server logs a warning each hour and records visits without countries. `EASL_SITE_GEOIP_DB` overrides where the script puts it.
 
 ### Backups
 
@@ -257,6 +290,10 @@ For a copy off the machine, [Litestream](https://litestream.io) can replicate th
 - **Resolved reports show no actions** on the Reports tab (nothing reopens a report).
 - **A user's moderation page** shows the log entries *about* them, not the ones they took as an admin (the Log tab has those).
 - **Reserved usernames** are in `src/validate.rs` (`RESERVED_USERNAMES`; `editor` and `playground` are among them); worth a look before launch. `ella` isn't reserved, since that would stop Ella signing up as `ella`; see the production note about registering it first.
+- **Visits are counted by a beacon from the page**, not from the server's request log: in production Caddy serves the docs from disk, so the server never sees their requests, and counting only browsers that run the page's scripts leaves out most crawlers. Blocking scripts (or the beacon) means not being counted.
+- **The visitor salt lives only in memory**, so a restart counts that day's earlier visitors again. Keeping it in the database would survive restarts but put it in the nightly backups, where, with the hashes, it would let addresses be recovered by trying them all.
+- **The visitor hash includes the user agent**, so two people behind one address (a household, an office) usually count as two visitors, and one person in two browsers counts as two.
+- **Visit rows are kept indefinitely**, since they hold no address and can't be tied to a person after their day.
 
 ## Not done
 

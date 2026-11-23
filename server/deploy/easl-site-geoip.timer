@@ -1,0 +1,10 @@
+[Unit]
+Description=Update the easl site's GeoIP database monthly
+
+[Timer]
+OnCalendar=*-*-05 04:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

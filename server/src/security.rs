@@ -12,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use crate::config::Config;
 use crate::error::AppError;
 use crate::state::AppState;
+use crate::visits::VISIT_PATH;
 
 /// Whether a state-changing request comes from this site: its `Origin` is
 /// an allowed origin, or, when a browser sends no `Origin`, its
@@ -31,6 +32,11 @@ pub fn is_same_site_request(config: &Config, parts: &Parts) -> bool {
 /// Middleware rejecting cross-site requests (403) for every method other
 /// than GET, HEAD, and OPTIONS. Together with `SameSite=Lax` session
 /// cookies, this is the site's CSRF protection.
+///
+/// The visit beacon ([`VISIT_PATH`]) is let through: it changes nothing
+/// but the visit counts, and the docs pages send it too, from the docs
+/// origin, which this check doesn't accept. Its handler ignores beacons
+/// from other sites' pages itself.
 pub async fn csrf_guard(
   State(state): State<AppState>,
   request: Request,
@@ -40,7 +46,7 @@ pub async fn csrf_guard(
     *request.method(),
     Method::GET | Method::HEAD | Method::OPTIONS
   );
-  if safe {
+  if safe || request.uri().path() == VISIT_PATH {
     return next.run(request).await;
   }
   let (parts, body) = request.into_parts();

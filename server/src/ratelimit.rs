@@ -35,6 +35,8 @@ pub enum Action {
   Report,
   /// A sketch view, counted once per viewer and sketch per window.
   View,
+  /// A page view recorded for the visit counts, by client address.
+  Visit,
 }
 
 /// How many checks pass between sweeps of stale entries.

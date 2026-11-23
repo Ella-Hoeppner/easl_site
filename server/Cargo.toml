@@ -22,6 +22,7 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 fs4 = { version = "1", default-features = false }
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls", "ring", "webpki-roots", "hostname", "pool"] }
+maxminddb = "0.33"
 minijinja = { version = "2", features = ["loader", "urlencode"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 rand = "0.9"

@@ -12,6 +12,7 @@ ExecStart=/usr/local/bin/easl-site-server serve \
   --editor-origin https://editor.easl-lang.org \
   --docs-origin https://easl-lang.org \
   --sync-examples-owner ella \
+  --geoip-db /var/lib/easl-site/dbip-country-lite.mmdb \
   --trust-proxy
 EnvironmentFile=/etc/easl-site.env
 Restart=on-failure

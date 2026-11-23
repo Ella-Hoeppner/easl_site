@@ -12,6 +12,12 @@ easl-lang.org {
 		reverse_proxy 127.0.0.1:8000
 	}
 
+	# The pages' visit beacon, which the server counts (server/README.md,
+	# "Visits").
+	handle /visit {
+		reverse_proxy 127.0.0.1:8000
+	}
+
 	handle {
 		root * /srv/easl-site
 		file_server
