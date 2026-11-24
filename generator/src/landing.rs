@@ -173,7 +173,7 @@ pub fn generate(site_dir: &Path) {
   );
 
   let hero = prose("hero.md");
-  let [name, tagline, description, ..] = &text_blocks(&hero)[..] else {
+  let [name, _tagline, description, ..] = &text_blocks(&hero)[..] else {
     panic!("hero.md must start with a name, a tagline, and a description");
   };
   let hero_source = read_source(&hero_path);
@@ -181,7 +181,7 @@ pub fn generate(site_dir: &Path) {
 
   let html = format!(
     include_str!("../assets/landing.html"),
-    title = escape_html(&format!("{name} — {}", tagline.trim_end_matches('.'))),
+    title = escape_html(name),
     description = escape_html(description),
     nav = render_markdown(&prose("nav.md")),
     hero = render_markdown(&hero),

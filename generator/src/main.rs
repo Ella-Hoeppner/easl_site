@@ -579,9 +579,9 @@ fn wrap_in_template(
   ));
 
   let full_title = if title.eq_ignore_ascii_case("easl") {
-    "Easl".to_string()
+    "easl".to_string()
   } else {
-    format!("{title} — Easl")
+    format!("{title} — easl")
   };
   format!(
     "<!doctype html>\n\
