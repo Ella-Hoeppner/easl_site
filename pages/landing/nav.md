@@ -1,6 +1,5 @@
 - [Guide](guide.md)
-- [Editor](https://editor.easl-lang.org/new)
-- [Explore](https://editor.easl-lang.org/)
+- [Editor](https://editor.easl-lang.org/)
 - [Reference](reference/overview.md)
 - [Functions](functions.html)
 - [GitHub](https://github.com/Ella-Hoeppner/easl)
