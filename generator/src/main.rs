@@ -23,6 +23,7 @@ mod landing;
 mod live_preview;
 mod nested_build;
 mod npm;
+mod sources;
 mod editor;
 
 /// One page of the site, in nav order.
@@ -89,6 +90,9 @@ fn main() {
   // The editor's JavaScript libraries, before the long builds, so a missing
   // one fails the build at once.
   npm::ensure_installed(&manifest_dir);
+  if sources::is_local() {
+    println!("building against local easl checkouts (EASL_DIR, EASL_LSP_DIR)");
+  }
 
   let mut rendered: Vec<RenderedPage> = Vec::new();
   let mut fn_entries: Vec<FnEntry> = Vec::new();

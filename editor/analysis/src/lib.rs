@@ -3,11 +3,12 @@
 //! slow (or stuck) compilation never freezes the editor.
 //!
 //! Most of the work is easl_lsp's own code, included unchanged from the
-//! sibling `easl_lsp` repository: positions (`source.rs`), semantic tokens
-//! and identifiers (`syntax.rs`), completion candidates (`completion.rs`),
-//! and structural edits (`structural.rs`). `analysis.rs` is its analysis
-//! over the sketch's files in place of a filesystem. The request handling
-//! mirrors easl_lsp's `server.rs`.
+//! `easl_lsp` repository (through the crate's `easl_lsp` link, which the
+//! docs generator points at the checkout it builds from): positions
+//! (`source.rs`), semantic tokens and identifiers (`syntax.rs`), completion
+//! candidates (`completion.rs`), and structural edits (`structural.rs`).
+//! `analysis.rs` is its analysis over the sketch's files in place of a
+//! filesystem. The request handling mirrors easl_lsp's `server.rs`.
 //!
 //! Positions are LSP positions: zero-based lines and UTF-16 columns.
 //! Results are JSON strings.
@@ -21,19 +22,19 @@ use tower_lsp::lsp_types::{Position, Range as LspRange};
 use wasm_bindgen::prelude::*;
 
 #[allow(dead_code)]
-#[path = "../../../../easl_lsp/src/source.rs"]
+#[path = "../easl_lsp/src/source.rs"]
 mod source;
 
 #[allow(dead_code)]
-#[path = "../../../../easl_lsp/src/syntax.rs"]
+#[path = "../easl_lsp/src/syntax.rs"]
 mod syntax;
 
 #[allow(dead_code)]
-#[path = "../../../../easl_lsp/src/completion.rs"]
+#[path = "../easl_lsp/src/completion.rs"]
 mod completion;
 
 #[allow(dead_code)]
-#[path = "../../../../easl_lsp/src/structural.rs"]
+#[path = "../easl_lsp/src/structural.rs"]
 mod structural;
 
 mod analysis;

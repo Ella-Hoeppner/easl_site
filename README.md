@@ -2,14 +2,28 @@
 
 The documentation for [easl](https://github.com/Ella-Hoeppner/easl) lives as plain Markdown in [`pages/`](pages/), readable directly on GitHub or in any Markdown viewer. A static site generator in [`generator/`](generator/) turns those pages into a styled HTML site, and also builds the **landing page**, a single screen with a live, WebGPU-rendered easl program as its background. The **editor** (at `editor.easl-lang.org`), where people write, save, and share easl sketches, is in the same repository: its page and language support in `generator/` and `editor/`, and the server behind it in `server/`.
 
-## Sibling checkouts
+## The easl it builds with
 
-Building the site needs two other repositories checked out next to this one:
+The site builds with released, pinned versions of easl, so it needs nothing else checked out:
 
-- [`easl`](https://github.com/Ella-Hoeppner/easl) at `../easl`: the compiler (a path dependency of the generator and the editor's analysis crate) and its web runtime (`../easl/web`), which the build compiles to WebAssembly.
-- [`easl_lsp`](https://github.com/Ella-Hoeppner/easl_lsp) at `../easl_lsp`: the editor's language support compiles some of its source files directly (see "The editor").
+- **The compiler** is the [`easl`](https://crates.io/crates/easl) crate from crates.io, a dependency of the generator and the editor's analysis crate (`easl = "0.1.0"` in both manifests).
+- **The web runtime** (the `web/` crate in [easl](https://github.com/Ella-Hoeppner/easl)'s repository), which the build compiles to WebAssembly, comes from the tag of that same release, `v0.1.0`.
+- **easl_lsp's modules**, which the editor's language support compiles in (see "The editor"), come from a pinned commit of [easl_lsp](https://github.com/Ella-Hoeppner/easl_lsp).
 
-The pages document the easl in that `../easl` checkout, and every program in them must compile with it, or the build fails.
+The generator fetches the last two from GitHub into `generator/target/sources/` the first time it needs them (`generator/src/sources.rs` holds the tag and the commit). The pages document that release of easl, and every program in them must compile with it, or the build fails.
+
+**Updating easl:** after publishing a release, change the version in `generator/Cargo.toml` and `editor/analysis/Cargo.toml` and the tag in `sources.rs` together (the build fails when they disagree), and the easl_lsp commit too when its modules changed. Pick an easl_lsp commit that's pushed and builds against that release.
+
+### Building against local checkouts
+
+To preview unreleased easl or easl_lsp changes, build against your checkouts at `../easl` and `../easl_lsp` instead:
+
+```
+cp .cargo/local-easl.toml .cargo/config.toml    # on
+rm .cargo/config.toml                           # off
+```
+
+While it's on (it's gitignored), Cargo patches the `easl` crate to `../easl` and the generator builds the runtime and easl_lsp's modules from the checkouts (`EASL_DIR`, `EASL_LSP_DIR`), saying so at the start of the build. The generator's and the analysis crate's `Cargo.lock` then point at the local crate; turn it off and build again before committing them. `deploy.sh` won't deploy the site while it's on.
 
 ## Running the site
 
@@ -23,7 +37,7 @@ That builds the site, seeds a demo database the first time (`server/data/easl-si
 
 The docs link to the editor at `https://editor.easl-lang.org` unless `EASL_EDITOR_ORIGIN` names another (`dev.sh` sets it to the local one). Pages can write links to the editor with its production address (`https://editor.easl-lang.org/s/<id>`), which works on GitHub too; the generator rewrites them for the editor it's building for.
 
-The build also builds the easl web runtime (`../easl/web/build.sh`), so it needs the `wasm32-unknown-unknown` target and `wasm-bindgen-cli` at the version pinned in easl's `web/Cargo.toml` (see `web/build.sh` there). It also needs Node.js with npm, which installs the editor's JavaScript libraries (see "The editor"); the build runs `npm ci` itself when they're missing or out of date.
+The build also builds the easl web runtime (easl's `web/build.sh`), so it needs `git`, the `wasm32-unknown-unknown` target, and `wasm-bindgen-cli` at the version pinned in easl's `web/Cargo.toml` (see `web/build.sh` there). It also needs Node.js with npm, which installs the editor's JavaScript libraries (see "The editor"); the build runs `npm ci` itself when they're missing or out of date.
 
 To rebuild the site on every change to the pages or the editor while the server runs (refresh the browser to see it; the server picks up a rebuilt site without restarting):
 
@@ -84,7 +98,7 @@ The editor (`editor.easl-lang.org`) is where people write easl sketches and run 
 - **The bar** shows the sketch's title (click to rename one of yours), its author (linking to their profile), Like, and ＋ Playlist (add it to one of your playlists, or start a new one), then Format, Save (or Fork, for someone else's), Revert, and Share. The tabs under the canvas hold the console, the comments, and About (description, visibility, forking, reporting, deleting). The editor talks to the server through `api.js`.
 - **The editor** is [Monaco](https://microsoft.github.io/monaco-editor/), an npm dependency pinned in `generator/package.json` and `generator/package-lock.json`. The generator installs it into `generator/node_modules/` (running `npm ci` there when that doesn't match the lockfile) and copies the parts of its AMD build the page loads (`min/vs/`'s loader, editor, and worker, not the other languages) to `site/editor/monaco/<version>/vs/`, writing the version to `site/editor/manifest.json`, from which the server's page loads it. Everything the editor loads comes from its own origin. `easl-language.js` gives it easl's colors, bracket and quote auto-closing, and the theme. Enter indents by the forms around the cursor.
 - **Updating Monaco:** change its version in `generator/package.json`, run `npm install` in `generator/` (which updates `package-lock.json`; commit both), and rebuild the site. A build whose `package.json` and lockfile disagree stops and says to run `npm install`. A new version's files go to a new path, so browsers never mix cached files of two versions. Within 0.52 that's all; Monaco 0.53 rearranged its `min/vs/` build (bundled chunks with hashed names, no `vs/base/worker/workerMain.js`), so moving past 0.52 means updating which parts the generator copies (`MONACO_FILES` in `editor.rs`, whose build stops naming any that's missing) and how `editor.js` loads it and starts its worker (`loadMonaco`).
-- **Language support** (`analysis.js`, `features.js`) is [easl_lsp](https://github.com/Ella-Hoeppner/easl_lsp)'s, compiled to WebAssembly by `editor/analysis/` and run in a worker (`analysis-worker.js`): diagnostics, hover (types and declarations), go-to-definition (into the other files too), completion, formatting, semantic tokens, and structural editing. The file being edited is checked as the main file of its own program, with the sketch's other files available to import, and errors in a file it imports appear on the import. The crate includes easl_lsp's `source.rs`, `syntax.rs`, `completion.rs`, and `structural.rs` unchanged from the sibling `../easl_lsp` checkout, so building the site needs that repository next to this one. `analysis.rs` is easl_lsp's analysis with the sketch's files in place of the filesystem; keep the two in step. The generator builds the crate on every run (it needs the wasm32 target and `wasm-bindgen`, like the web runtime).
+- **Language support** (`analysis.js`, `features.js`) is [easl_lsp](https://github.com/Ella-Hoeppner/easl_lsp)'s, compiled to WebAssembly by `editor/analysis/` and run in a worker (`analysis-worker.js`): diagnostics, hover (types and declarations), go-to-definition (into the other files too), completion, formatting, semantic tokens, and structural editing. The file being edited is checked as the main file of its own program, with the sketch's other files available to import, and errors in a file it imports appear on the import. The crate includes easl_lsp's `source.rs`, `syntax.rs`, `completion.rs`, and `structural.rs` unchanged, through its `easl_lsp` link (gitignored), which the generator points at the easl_lsp checkout it builds from (see "The easl it builds with"). `analysis.rs` is easl_lsp's analysis with the sketch's files in place of the filesystem; keep the two in step. The generator builds the crate on every run (it needs the wasm32 target and `wasm-bindgen`, like the web runtime).
 - **The docs' examples** (the landing page's program, the `.easl` files in `pages/editor/`, listed with their titles in `EXTRA_EXAMPLES` in `editor.rs`, and every live preview's program) are ordinary sketches in the editor, owned by Ella's account (`ella`). Each has a sketch id fixed in `pages/editor/sketch-ids.json` (the generator gives a new example one and saves it), so the docs link to `/s/<id>`; the generator writes the examples to `site/editor/examples.json`, and the server's `sync-examples` (run at startup with `--sync-examples-owner ella`) keeps those sketches in step. A new sketch starts from `generator/assets/editor/new-sketch.easl`.
 - **Code blocks:** an `easl` code block on a docs page that's a whole program (it has a `@cpu` entry and compiles on its own) gets an "Open in the editor" link, which opens a new sketch with the program carried in the URL (`/new#code=…`). A block fenced as ` ```easl no-editor ` doesn't, for programs the editor can't run (file I/O) or that a live preview already links.
 

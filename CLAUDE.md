@@ -4,7 +4,7 @@ The easl docs (`easl-lang.org`, static) and the online editor (`editor.easl-lang
 
 ## Layout
 
-- `pages/`: the docs, as Markdown. `generator/` (Rust) builds them, the landing page, and the editor's assets into `site/` (gitignored). The generator builds against the sibling checkouts `../easl` (the compiler and web runtime) and `../easl_lsp`, so the site always reflects whatever is in those working trees.
+- `pages/`: the docs, as Markdown. `generator/` (Rust) builds them, the landing page, and the editor's assets into `site/` (gitignored). The generator builds against pinned easl releases: the `easl` crate from crates.io, and the web runtime and easl_lsp's modules from pinned GitHub revisions (`generator/src/sources.rs`). A gitignored `.cargo/config.toml` (copied from `.cargo/local-easl.toml`) switches builds to the local `../easl` and `../easl_lsp` checkouts; see README.md, "The easl it builds with".
 - `generator/assets/editor/`: the editor's JavaScript and CSS; `editor/analysis/`: its language support, compiled to WebAssembly. Monaco is an npm dependency (`generator/package.json`), copied into the site at build time.
 - `server/`: the editor's server (axum, sqlx with SQLite, minijinja). Templates in `server/templates/` (the rules and privacy page's prose is `rules.md` there), static assets in `server/static/`, migrations in `server/migrations/`, deployment files in `server/deploy/`.
 

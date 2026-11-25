@@ -24,6 +24,7 @@ use pulldown_cmark::{Event, Parser, Tag, TagEnd, html::push_html};
 
 use crate::{
   editor::Example, escape_html, highlight, nested_build, rewrite_md_link,
+  sources,
 };
 
 /// The page's prose, relative to the generator's manifest directory.
@@ -31,10 +32,6 @@ const LANDING_PAGES_PATH: &str = "../pages/landing";
 
 /// The background program, relative to the generator's manifest directory.
 const HERO_PROGRAM_PATH: &str = "../pages/main_page_example.easl";
-
-/// The easl web runtime crate, relative to the generator's manifest
-/// directory.
-const WEB_RUNTIME_PATH: &str = "../../easl/web";
 
 /// Where the web runtime and the programs it runs (the background program
 /// and every page's live previews) go, relative to the site root.
@@ -168,7 +165,7 @@ pub fn generate(site_dir: &Path) {
   let hero_path = manifest_dir.join(HERO_PROGRAM_PATH);
   package_hero_program(
     &hero_path,
-    &manifest_dir.join(WEB_RUNTIME_PATH),
+    &sources::easl_dir(&manifest_dir).join("web"),
     &site_dir.join(RUNTIME_DIR),
   );
 

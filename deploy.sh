@@ -20,9 +20,14 @@ case "$what" in
 esac
 
 if [ "$what" != server ]; then
+  # Deploys build the pinned easl releases, never local checkouts.
+  if [ -f .cargo/config.toml ]; then
+    echo "the local easl override is on (.cargo/config.toml); delete it to deploy" >&2
+    exit 1
+  fi
   rm -rf site
   # The production editor origin: dev.sh's override must not leak in.
-  (cd generator && env -u EASL_EDITOR_ORIGIN cargo run)
+  (cd generator && env -u EASL_EDITOR_ORIGIN -u EASL_DIR -u EASL_LSP_DIR cargo run)
   rsync -az --delete site/ deploy@easl-site:/srv/easl-site/
   echo "deployed the docs to https://easl-lang.org"
 fi

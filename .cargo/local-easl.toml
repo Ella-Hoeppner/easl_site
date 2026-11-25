@@ -1,0 +1,16 @@
+# Builds the site against the local easl and easl_lsp checkouts beside this
+# repository instead of the pinned releases. To turn it on:
+#
+#   cp .cargo/local-easl.toml .cargo/config.toml
+#
+# and delete .cargo/config.toml to turn it off. While it's on, the
+# generator's and the analysis crate's Cargo.lock files point easl at the
+# local checkout; don't commit them that way. deploy.sh refuses to deploy
+# with it on.
+
+[patch.crates-io]
+easl = { path = "../easl" }
+
+[env]
+EASL_DIR = { value = "../easl", relative = true }
+EASL_LSP_DIR = { value = "../easl_lsp", relative = true }

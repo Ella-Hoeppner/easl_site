@@ -8,3 +8,11 @@
 
 # The editor's JavaScript libraries (`npm ci` in generator/ installs them)
 /generator/node_modules/
+
+# The easl_lsp checkout the editor's analysis crate compiles modules from (a
+# link the generator makes; see generator/src/sources.rs)
+/editor/analysis/easl_lsp
+
+# The local-checkout override (see the README, "Building against local
+# checkouts")
+/.cargo/config.toml

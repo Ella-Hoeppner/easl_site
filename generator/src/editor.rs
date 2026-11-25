@@ -36,7 +36,7 @@ use std::{
 use easl::{compile_easl_source_to_wgsl, web_bundle::bundle_program};
 use serde_json::json;
 
-use crate::{landing::RUNTIME_DIR, nested_build, npm};
+use crate::{landing::RUNTIME_DIR, nested_build, npm, sources};
 
 /// Where the editor's files go, relative to the site root.
 pub const EDITOR_DIR: &str = "editor";
@@ -51,9 +51,10 @@ const EDITOR_ORIGIN_VARIABLE: &str = "EASL_EDITOR_ORIGIN";
 /// The analysis crate, relative to the generator's manifest directory.
 const ANALYSIS_CRATE_PATH: &str = "../editor/analysis";
 
-/// The web runtime's build output, relative to the generator's manifest
-/// directory.
-const WEB_RUNTIME_DIST_PATH: &str = "../../easl/web/dist";
+/// Where the analysis crate finds easl_lsp's repository (a link the build
+/// points at the checkout `sources::easl_lsp_dir` picks), relative to the
+/// crate.
+const ANALYSIS_EASL_LSP_LINK: &str = "easl_lsp";
 
 /// The runtime build that compiles programs from their sources, which the
 /// editor compiles programs with (see `runner.html`).
@@ -266,6 +267,24 @@ pub fn extra_examples() -> Vec<Example> {
     .collect()
 }
 
+/// Points the analysis crate's `easl_lsp` link at `easl_lsp_dir`, whose
+/// `src/` modules the crate compiles in.
+fn link_easl_lsp(crate_dir: &Path, easl_lsp_dir: &Path) {
+  let link = crate_dir.join(ANALYSIS_EASL_LSP_LINK);
+  let target = fs::canonicalize(easl_lsp_dir).unwrap();
+  if fs::read_link(&link).is_ok_and(|current| current == target) {
+    return;
+  }
+  if fs::symlink_metadata(&link).is_ok() {
+    fs::remove_file(&link).unwrap_or_else(|e| {
+      panic!("couldn't replace the link {}: {e}", link.display())
+    });
+  }
+  std::os::unix::fs::symlink(&target, &link).unwrap_or_else(|e| {
+    panic!("couldn't link {} to {}: {e}", link.display(), target.display())
+  });
+}
+
 /// Builds the analysis crate to WebAssembly and generates its bindings into
 /// `out_dir`.
 fn build_analysis(crate_dir: &Path, out_dir: &Path) {
@@ -400,12 +419,11 @@ pub fn generate(site_dir: &Path, examples: Vec<Example>) {
 
   let dir = site_dir.join(EDITOR_DIR);
   fs::create_dir_all(&dir).unwrap();
-  build_analysis(
-    &manifest_dir.join(ANALYSIS_CRATE_PATH),
-    &dir.join("analysis"),
-  );
+  let analysis_crate = manifest_dir.join(ANALYSIS_CRATE_PATH);
+  link_easl_lsp(&analysis_crate, &sources::easl_lsp_dir(&manifest_dir));
+  build_analysis(&analysis_crate, &dir.join("analysis"));
   let runtime_dir = site_dir.join(RUNTIME_DIR);
-  let dist = manifest_dir.join(WEB_RUNTIME_DIST_PATH);
+  let dist = sources::easl_dir(&manifest_dir).join("web").join("dist");
   for name in COMPILER_RUNTIME_FILES {
     fs::copy(dist.join(name), runtime_dir.join(name)).unwrap_or_else(|e| {
       panic!(

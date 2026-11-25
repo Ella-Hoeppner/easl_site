@@ -6,14 +6,15 @@ edition = "2024"
 # The editor's language support, compiled to WebAssembly: diagnostics,
 # hover, go-to-definition, completion, formatting, semantic tokens, and
 # structural editing, for a sketch's files. Most of it is easl_lsp's own code
-# (`../../../easl_lsp/src`), included as-is; see src/lib.rs. Built by the
-# docs generator.
+# (`easl_lsp/src`, a link the docs generator points at the easl_lsp checkout
+# it builds from), included as-is; see src/lib.rs. Built by the docs
+# generator.
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-easl = { path = "../../../easl" }
+easl = "0.1.0"
 fsexp = "0.1"
 serde_json = "1"
 wasm-bindgen = "=0.2.129"

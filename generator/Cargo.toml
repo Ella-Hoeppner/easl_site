@@ -4,6 +4,8 @@ version = "0.0.0"
 edition = "2021"
 
 [workspace]
+# The easl sources the build fetches (src/sources.rs) aren't part of it.
+exclude = ["target/sources"]
 
 [dependencies]
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
@@ -11,6 +13,6 @@ pulldown-cmark = { version = "0.13", default-features = false, features = ["html
 # self-verifying: every easl snippet shown on it is compiled at site-build
 # time, and the hero demo's WGSL is emitted by the actual easl compiler
 # (then naga-validated) rather than being a hand-maintained copy.
-easl = { path = "../../easl" }
+easl = "0.1.0"
 naga = { version = "29.0.3", features = ["wgsl-in"] }
 serde_json = "1"
