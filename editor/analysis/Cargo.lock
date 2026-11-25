@@ -96,9 +96,9 @@ dependencies = [
 
 [[package]]
 name = "easl"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "969f770843f3cb2ab2eee448b0c022c31da65820d85b1a4f5605e272ba0a1176"
+checksum = "0cbf41dc8848983219076ab1aaf46127844a19657122cbc1eadb3e6cdb04a706"
 dependencies = [
  "arc-swap",
  "fsexp",

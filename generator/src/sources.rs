@@ -17,7 +17,7 @@ use std::process::Command;
 /// release of the `easl` version in `Cargo.toml` and
 /// `../editor/analysis/Cargo.toml` (checked by [`easl_dir`]).
 const EASL_REPOSITORY: &str = "https://github.com/Ella-Hoeppner/easl.git";
-const EASL_TAG: &str = "v0.1.0";
+const EASL_TAG: &str = "v0.2.0";
 
 /// The easl_lsp repository, and the commit whose modules the editor's
 /// analysis crate compiles in. They must build against the `easl` version

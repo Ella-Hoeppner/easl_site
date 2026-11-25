@@ -450,9 +450,20 @@ Restarts the audio clock: `(audio-time)` and `(audio-time period)` count from `0
 
 ```easl
 (audio-input): f32
+(audio-input channel: u32): f32
 ```
 
-The current sample from the input device chosen with `start-listening`, mono and roughly in `[-1, 1]`; `0.` when nothing is listening. **Audio code only.**
+The current sample from the input device chosen with `start-listening`, roughly in `[-1, 1]`. **Audio code only.**
+
+Without a `channel`, it's the mean of the input's channels, so a stereo input is mixed down to mono; `0.` when nothing is listening. With one, it's that channel's sample, counting from `0` (a stereo input's left channel is `0`, its right `1`). Reading a channel the input doesn't have is a runtime error, which stops the audio code.
+
+### `audio-input-channel-count`
+
+```easl
+(audio-input-channel-count): u32
+```
+
+How many channels the input has; `0` when nothing is listening. **Audio code only.**
 
 ### `start-listening`
 

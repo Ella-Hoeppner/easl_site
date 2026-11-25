@@ -6,8 +6,8 @@ The documentation for [easl](https://github.com/Ella-Hoeppner/easl) lives as pla
 
 The site builds with released, pinned versions of easl, so it needs nothing else checked out:
 
-- **The compiler** is the [`easl`](https://crates.io/crates/easl) crate from crates.io, a dependency of the generator and the editor's analysis crate (`easl = "0.1.0"` in both manifests).
-- **The web runtime** (the `web/` crate in [easl](https://github.com/Ella-Hoeppner/easl)'s repository), which the build compiles to WebAssembly, comes from the tag of that same release, `v0.1.0`.
+- **The compiler** is the [`easl`](https://crates.io/crates/easl) crate from crates.io, a dependency of the generator and the editor's analysis crate (`easl = "0.2.0"` in both manifests).
+- **The web runtime** (the `web/` crate in [easl](https://github.com/Ella-Hoeppner/easl)'s repository), which the build compiles to WebAssembly, comes from the tag of that same release, `v0.2.0`.
 - **easl_lsp's modules**, which the editor's language support compiles in (see "The editor"), come from a pinned commit of [easl_lsp](https://github.com/Ella-Hoeppner/easl_lsp).
 
 The generator fetches the last two from GitHub into `generator/target/sources/` the first time it needs them (`generator/src/sources.rs` holds the tag and the commit). The pages document that release of easl, and every program in them must compile with it, or the build fails.
