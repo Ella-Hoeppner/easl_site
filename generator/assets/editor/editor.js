@@ -1013,6 +1013,8 @@ const runner = new Runner({
     editor.setPosition({ lineNumber: line, column: 1 });
     editor.focus();
   },
+  // An error shows in the console even when another tab is open.
+  onError: () => social.selectTab("console"),
 });
 
 async function run() {

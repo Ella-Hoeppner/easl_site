@@ -36,12 +36,14 @@ export const supportsWebGPU = Boolean(navigator.gpu);
 export class Runner {
   /**
    * `reveal(path, line)` shows a place in the document (for links in the
-   * console), and `onState(state)` hears each change of the run's state:
-   * "stopped", "checking", "starting", "running", "paused", or "finished".
+   * console), `onState(state)` hears each change of the run's state:
+   * "stopped", "checking", "starting", "running", "paused", or "finished",
+   * and `onError()` hears each error the console shows.
    */
-  constructor({ reveal, onState }) {
+  constructor({ reveal, onState, onError }) {
     this.reveal = reveal;
     this.onState = onState;
+    this.onError = onError;
     this.current = null;
     this.token = 0;
     this.state = "stopped";
@@ -127,6 +129,7 @@ export class Runner {
     while (output.childElementCount > MAX_CONSOLE_LINES) output.firstElementChild.remove();
     output.scrollTop = output.scrollHeight;
     $("console-empty").hidden = true;
+    if (kind === "error") this.onError?.();
   }
 
   clearConsole() {

@@ -82,7 +82,7 @@ export class Social {
       this.commentsLoaded = null;
       $("comments-panel").replaceChildren();
       if (!sketch && document.querySelector(".panel-tab.active")?.dataset.panel === "comments") {
-        this.selectTab("console");
+        this.selectTab("about");
       }
     }
     $("comments-count").textContent = sketch?.comment_count ? String(sketch.comment_count) : "";
@@ -125,7 +125,7 @@ export class Social {
     switch (doc.kind) {
       case "sketch":
       case "published":
-        panel.replaceChildren(...this.aboutSketch(doc.sketch));
+        panel.replaceChildren(...this.aboutSketch(doc.sketch).filter((part) => part != null));
         break;
       default:
         panel.replaceChildren(

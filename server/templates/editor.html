@@ -103,19 +103,19 @@
     </div>
     <div id="console-splitter" class="splitter horizontal" role="separator" aria-orientation="horizontal" title="Drag to resize"></div>
     <div class="panel-bar" role="tablist">
-      <button class="panel-tab active" data-panel="console" role="tab" aria-selected="true">Console</button>
+      <button class="panel-tab active" data-panel="about" role="tab" aria-selected="true">About</button>
+      <button class="panel-tab" data-panel="console" role="tab" aria-selected="false">Console</button>
       <button id="comments-tab" class="panel-tab" data-panel="comments" role="tab" aria-selected="false" hidden>Comments <span id="comments-count" class="count"></span></button>
-      <button class="panel-tab" data-panel="about" role="tab" aria-selected="false">About</button>
-      <span class="console-hint">Click the canvas to give the program the keyboard (and let it play sound).</span>
-      <button id="clear" class="small">Clear</button>
+      <span class="console-hint" hidden>Click the canvas to give the program the keyboard (and let it play sound).</span>
+      <button id="clear" class="small" hidden>Clear</button>
     </div>
     <div class="panels">
-      <div id="console-panel" class="panel console-wrap">
+      <div id="console-panel" class="panel console-wrap" hidden>
         <p id="console-empty" class="console-empty">What the program prints, and any errors, appear here.</p>
         <div id="console" class="console" aria-live="polite"></div>
       </div>
       <div id="comments-panel" class="panel comments-panel" hidden></div>
-      <div id="about-panel" class="panel about-panel" hidden></div>
+      <div id="about-panel" class="panel about-panel"></div>
     </div>
   </section>
 </main>
