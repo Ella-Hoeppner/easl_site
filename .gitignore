@@ -16,3 +16,6 @@
 # The local-checkout override (see the README, "Building against local
 # checkouts")
 /.cargo/config.toml
+
+# Ella's local tools (never committed)
+/local/
