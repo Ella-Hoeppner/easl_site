@@ -203,15 +203,9 @@ The machine (Ubuntu): Caddy from its apt repository; `build-essential`, `pkg-con
 
 Caddy (`deploy/Caddyfile`, installed as `/etc/caddy/Caddyfile`; `systemctl reload caddy` after changing it) serves the docs itself and proxies the editor host. The app sets its own cache headers (a year for `?v=` URLs, revalidation otherwise, `no-store` for pages that depend on the session); the docs keep Caddy's rules. On the docs host, Caddy hands the visit beacon (`/visit`) to the server, and the old playground and the app's paths (`@moved`), which the server answers with its docs-host redirects (it maps `?example=<id>` to the example's sketch, so the mapping lives in one place). Caddy passes the original `Host` through, which is how the server tells the two hosts apart: requests proxied from the `easl-lang.org` block arrive as `Host: easl-lang.org` and get the docs host's redirects. Every name is "DNS only" in Cloudflare (not proxied): the server rate-limits by the client's address, which a proxy would replace with its own, and Caddy gets each name's certificate itself. (The app also compresses with gzip/brotli; Caddy leaves already-encoded responses alone.)
 
-The examples: with `--sync-examples-owner ella`, each start syncs `editor/examples.json` into ella's sketches (and logs and carries on when ella doesn't exist yet). To sync by hand after a site deploy without restarting: `sudo -u easl easl-site-server sync-examples --db /var/lib/easl-site/easl-site.db --site-dir /srv/easl-site`. Whoever registers `ella` first owns the examples, so Ella signs up as soon as the editor is up.
+The examples: with `--sync-examples-owner ella`, each start syncs `editor/examples.json` into ella's sketches (and logs and carries on when ella doesn't exist yet). To sync by hand after a site deploy without restarting: `sudo -u easl easl-site-server sync-examples --db /var/lib/easl-site/easl-site.db --site-dir /srv/easl-site`. Ella's account, `ella`, owns them (and is an admin).
 
-**Launching** (once; everything above is in place, with the new Caddy config staged as `/etc/caddy/Caddyfile.launch` and the service installed but not enabled):
-
-1. `./deploy.sh site`.
-2. On the machine: `cp /etc/caddy/Caddyfile.launch /etc/caddy/Caddyfile && systemctl reload caddy && systemctl enable --now easl-site`.
-3. Ella signs up as `ella` at `https://editor.easl-lang.org/signup` and follows the verification email.
-4. On the machine: `sudo -u easl easl-site-server admin grant ella --db /var/lib/easl-site/easl-site.db`, then `systemctl restart easl-site` to sync the examples into her account.
-5. Check: the examples open from the docs, signing up and verifying, saving and publishing a sketch, commenting, liking, reporting, and the moderation page; then `systemctl start easl-site-backup` and check the backup it made.
+**Rolling back the editor** (as root on the machine): `systemctl disable --now easl-site`, then `cp /etc/caddy/Caddyfile.prelaunch /etc/caddy/Caddyfile && systemctl reload caddy`, which serves the docs alone, as before the editor launched.
 
 ### The GeoIP database
 
@@ -289,7 +283,7 @@ For a copy off the machine, [Litestream](https://litestream.io) can replicate th
 - **An admin deleting a comment counts as moderating only when it's neither their comment nor on their sketch**; as an author or owner they're logged like anyone else (not at all), and the Deleted comments tab labels them "the author" or "the sketch owner".
 - **Resolved reports show no actions** on the Reports tab (nothing reopens a report).
 - **A user's moderation page** shows the log entries *about* them, not the ones they took as an admin (the Log tab has those).
-- **Reserved usernames** are in `src/validate.rs` (`RESERVED_USERNAMES`; `editor` and `playground` are among them); worth a look before launch. `ella` isn't reserved, since that would stop Ella signing up as `ella`; see the production note about registering it first.
+- **Reserved usernames** are in `src/validate.rs` (`RESERVED_USERNAMES`; `editor` and `playground` are among them)). `ella` isn't reserved; it's Ella's account, which owns the examples.
 - **Visits are counted by a beacon from the page**, not from the server's request log: in production Caddy serves the docs from disk, so the server never sees their requests, and counting only browsers that run the page's scripts leaves out most crawlers. Blocking scripts (or the beacon) means not being counted.
 - **The visitor salt lives only in memory**, so a restart counts that day's earlier visitors again. Keeping it in the database would survive restarts but put it in the nightly backups, where, with the hashes, it would let addresses be recovered by trying them all.
 - **The visitor hash includes the user agent**, so two people behind one address (a household, an office) usually count as two visitors, and one person in two browsers counts as two.
