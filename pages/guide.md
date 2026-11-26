@@ -16,7 +16,7 @@ Easl can also be run on the CPU, and the CPU runtime can open windows, dispatch 
 - **[The CPU runtime](cpu.md)** demonstrates the CPU side of the language, including the process of spawning windows, dispatching shaders, responding to user input, and generating audio.
 - **[Builtin reference](reference/overview.md)** and the searchable **[function index](functions.md)** are useful for seeing all of the builtin functions available in easl.
 - **[Worked example: Raymarching](raymarch.md)** is a walkthrough that uses easl to build a raymarcher. It shows off a lot of easl's unique features and is a great way to get started with the language.
-- **[The editor](https://editor.easl-lang.org/new)** lets you write easl in your browser and run it live, with types on hover and errors as you type, then save your sketches, publish them, and share them. Every example on these pages that's a whole program has a link to open it there, and [Explore](https://editor.easl-lang.org/) shows what everyone has made.
+- **[The editor](https://editor.easl-lang.org/explore)** lets you write and run easl directly in your browser, Shadertoy-style.
 
 ## Tooling
 
@@ -25,3 +25,22 @@ Easl can also be run on the CPU, and the CPU runtime can open windows, dispatch 
 - [easl_lsp](https://github.com/Ella-Hoeppner/easl_lsp): a work-in-progress language server, with a VS Code client.
 
 Easl is a work in progress; expect breaking changes.
+
+
+## Quick start guide
+
+To install easl, you'll need the Rust toolchain installed.
+
+The easiest way to get started with easl is to clone the CLI repo and build it yourself. The repo also comes with a collection of examples you can look at to get an idea of what the language is capable of.
+
+```
+git clone https://github.com/Ella-Hoeppner/easl_cli
+cd easl_cli && cargo install --path .
+easl run examples/simple.easl
+```
+
+You can also install the easl CLI straight from cargo:
+
+```
+cargo install --locked easl_cli
+```
