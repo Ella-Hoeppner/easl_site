@@ -3,10 +3,12 @@
 //! The editor build lists the examples in `editor/examples.json`, each with
 //! the fixed sketch id the docs link to. [`sync`] makes each one an
 //! ordinary public sketch owned by one user (Ella's account) at that id,
-//! creating it or bringing its title, description, and files up to date.
-//! New files are saved as a new revision and published at once. It never
-//! deletes anything and never touches likes, comments, thumbnails, tags,
-//! or visibility.
+//! creating it, or bringing over what the docs changed since the last sync
+//! (`example_syncs` remembers what they said then): a changed title or
+//! description replaces the sketch's, and changed files are saved as a new
+//! revision and published at once. What the docs didn't change stays as
+//! edited on the site. It never deletes anything and never touches likes,
+//! comments, thumbnails, tags, or visibility.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -84,14 +86,30 @@ impl fmt::Display for SyncReport {
 enum Change {
   Create(NewSketch),
   Update(SketchUpdate),
+  /// An existing sketch that was never synced: its title, description, and
+  /// files stay as they are, and what the docs say now is remembered as
+  /// what they said at the last sync.
+  Adopt,
   Unchanged,
 }
 
+/// What the docs said about an example at its last sync (a row of
+/// `example_syncs`).
+#[derive(sqlx::FromRow)]
+struct Synced {
+  title: String,
+  description: String,
+  files: String,
+}
+
 /// Makes every example a public sketch owned by `owner` at its
-/// `sketch_id`, creating missing ones and updating ones whose title,
-/// description, or files differ (bumping `updated_at` only then). An
-/// example's files become its sketch's head and, unless the sketch was made
-/// private, its published revision, replacing any draft.
+/// `sketch_id`, creating missing ones. For an existing one, whatever of its
+/// title, description, and files the docs changed since the last sync
+/// replaces the sketch's (bumping `updated_at` only then); the rest stays as
+/// edited on the site. Changed files become the sketch's head and, unless
+/// the sketch was made private, its published revision, replacing any
+/// draft. A sketch the docs never synced (made before syncs were
+/// remembered) is adopted as it is.
 ///
 /// Everything is checked before anything is written: it fails when the
 /// owner doesn't exist, when an example is invalid (a bad sketch id, title,
@@ -117,11 +135,12 @@ pub async fn sync(
     let change = plan(db, owner.id, &owner.username, example)
       .await
       .with_context(|| format!("the example {:?}", example.id))?;
-    changes.push((example.sketch_id.as_str(), change));
+    changes.push((example, change));
   }
   let mut report = SyncReport::default();
   let budget = HistoryBudget::default();
-  for (id, change) in changes {
+  for (example, change) in changes {
+    let id = example.sketch_id.as_str();
     match change {
       Change::Create(sketch) => {
         let inserted = sketches::insert(db, id, owner.id, &sketch, &budget)
@@ -130,13 +149,19 @@ pub async fn sync(
         if !inserted {
           bail!("the sketch id {id:?} was taken while syncing");
         }
+        remember(db, example).await?;
         report.created += 1;
       }
       Change::Update(update) => {
         sketches::update(db, id, &update, &budget)
           .await
           .map_err(AppError::into_anyhow)?;
+        remember(db, example).await?;
         report.updated += 1;
+      }
+      Change::Adopt => {
+        remember(db, example).await?;
+        report.unchanged += 1;
       }
       Change::Unchanged => report.unchanged += 1,
     }
@@ -185,32 +210,75 @@ async fn plan(
       row.owner_username
     );
   }
-  let head = row.head_contents(db).await?;
-  // The entry file stays as it is while it's still one of the files.
-  let entry_file = match &head.entry_file {
-    Some(path) if example.files.iter().any(|f| &f.path == path) => path.clone(),
-    _ => first_file,
+  let synced: Option<Synced> = sqlx::query_as(
+    "SELECT title, description, files FROM example_syncs WHERE sketch_id = ?",
+  )
+  .bind(&example.sketch_id)
+  .fetch_optional(db)
+  .await?;
+  let Some(synced) = synced else {
+    return Ok(Change::Adopt);
   };
-  let contents = Contents {
-    files: example.files.clone(),
-    entry_file: Some(entry_file),
-    entry_name: head.entry_name.clone(),
-  };
-  let published = row.visibility == Visibility::Private
-    || row.published_revision == Some(row.head_revision);
-  let changed = contents != head
-    || !published
-    || title != row.title
-    || description != row.description;
-  if !changed {
+  let title_changed = title != synced.title;
+  let description_changed = description != synced.description;
+  let files_changed = files_json(&example.files)? != synced.files;
+  if !title_changed && !description_changed && !files_changed {
     return Ok(Change::Unchanged);
   }
+  let contents = if files_changed {
+    let head = row.head_contents(db).await?;
+    // The entry file stays as it is while it's still one of the files.
+    let entry_file = match &head.entry_file {
+      Some(path) if example.files.iter().any(|f| &f.path == path) => {
+        path.clone()
+      }
+      _ => first_file,
+    };
+    Some(Contents {
+      files: example.files.clone(),
+      entry_file: Some(entry_file),
+      entry_name: head.entry_name.clone(),
+    })
+  } else {
+    None
+  };
   Ok(Change::Update(SketchUpdate {
-    title,
-    description,
-    contents: Some(contents),
+    title: if title_changed { title } else { row.title },
+    description: if description_changed {
+      description
+    } else {
+      row.description
+    },
+    contents,
     visibility: row.visibility,
-    publish: true,
+    publish: files_changed,
     tags: None,
   }))
+}
+
+/// An example's files as `example_syncs` keeps them.
+fn files_json(files: &[SketchFile]) -> anyhow::Result<String> {
+  Ok(serde_json::to_string(files)?)
+}
+
+/// Records what the docs say about `example` now, as what they said at its
+/// last sync.
+async fn remember(db: &SqlitePool, example: &Example) -> anyhow::Result<()> {
+  let invalid = AppError::into_anyhow;
+  let title = validate::sketch_title(&example.title).map_err(invalid)?;
+  let description =
+    validate::sketch_description(&example.description).map_err(invalid)?;
+  sqlx::query(
+    "INSERT INTO example_syncs (sketch_id, title, description, files) \
+     VALUES (?, ?, ?, ?) ON CONFLICT (sketch_id) DO UPDATE SET \
+     title = excluded.title, description = excluded.description, \
+     files = excluded.files",
+  )
+  .bind(&example.sketch_id)
+  .bind(title)
+  .bind(description)
+  .bind(files_json(&example.files)?)
+  .execute(db)
+  .await?;
+  Ok(())
 }

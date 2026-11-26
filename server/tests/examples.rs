@@ -141,6 +141,106 @@ async fn sync_creates_then_updates_only_what_changed() {
   assert_eq!(rings["title"], "Rings again");
 }
 
+/// The Waves123 sketch, as `client` sees it.
+async fn waves(client: &mut common::Client<'_>) -> Value {
+  client
+    .api(Method::GET, "/api/sketches/Waves123", Value::Null)
+    .await
+    .json()
+}
+
+#[tokio::test]
+async fn edits_on_the_site_survive_until_the_docs_change_them() {
+  let app = TestApp::new().await;
+  let mut ella = app.user("ella").await;
+  let db = &app.state.db;
+  let mut examples =
+    vec![example("waves", "Waves123", "Waves", "(defn main [])")];
+  examples::sync(db, "ella", &examples).await.expect("sync");
+
+  // Ella edits the title, the description, and the code (a draft).
+  let edited = ella
+    .api(
+      Method::PUT,
+      "/api/sketches/Waves123",
+      json!({
+        "title": "Wavy",
+        "description": "Draw on the canvas!",
+        "files": [{"path": "main.easl", "content": "(defn main [] 2)"}],
+      }),
+    )
+    .await;
+  assert_eq!(edited.status, StatusCode::OK);
+  let source = |sketch: &Value| sketch["files"][0]["content"].clone();
+
+  // A sync of unchanged docs (a restart) keeps all of it, draft included.
+  let again = examples::sync(db, "ella", &examples).await.expect("sync");
+  assert_eq!(again, report(0, 0, 1));
+  let own = waves(&mut ella).await;
+  assert_eq!(own["title"], "Wavy");
+  assert_eq!(own["description"], "Draw on the canvas!");
+  assert_eq!(source(&own), "(defn main [] 2)");
+  assert_eq!(own["has_draft"], true);
+
+  // The docs changing the description replaces only the description.
+  examples[0].description = "Waves, from the docs.".into();
+  let changed = examples::sync(db, "ella", &examples).await.expect("sync");
+  assert_eq!(changed, report(0, 1, 0));
+  let own = waves(&mut ella).await;
+  assert_eq!(own["title"], "Wavy");
+  assert_eq!(own["description"], "Waves, from the docs.");
+  assert_eq!(source(&own), "(defn main [] 2)");
+  assert_eq!(own["has_draft"], true);
+
+  // The docs changing the code replaces the draft, published.
+  examples[0].files[0].content = "(defn main [] 3)".into();
+  examples::sync(db, "ella", &examples).await.expect("sync");
+  let own = waves(&mut ella).await;
+  assert_eq!(source(&own), "(defn main [] 3)");
+  assert_eq!(own["has_draft"], false);
+  assert_eq!(own["title"], "Wavy");
+}
+
+#[tokio::test]
+async fn sketches_synced_before_syncs_were_remembered_are_adopted() {
+  let app = TestApp::new().await;
+  let mut ella = app.user("ella").await;
+  let db = &app.state.db;
+  let mut examples =
+    vec![example("waves", "Waves123", "Waves", "(defn main [])")];
+  examples::sync(db, "ella", &examples).await.expect("sync");
+  ella
+    .api(
+      Method::PUT,
+      "/api/sketches/Waves123",
+      json!({"description": "Draw on the canvas!"}),
+    )
+    .await;
+  // As on a database synced before `example_syncs` existed.
+  sqlx::query("DELETE FROM example_syncs")
+    .execute(db)
+    .await
+    .expect("forget");
+  examples[0].title = "Waves (new)".into();
+  let adopted = examples::sync(db, "ella", &examples).await.expect("sync");
+  assert_eq!(adopted, report(0, 0, 1));
+  let own = ella
+    .api(Method::GET, "/api/sketches/Waves123", Value::Null)
+    .await
+    .json();
+  assert_eq!(own["title"], "Waves");
+  assert_eq!(own["description"], "Draw on the canvas!");
+  // From then on, the docs' changes come through.
+  examples[0].title = "Waves (newer)".into();
+  examples::sync(db, "ella", &examples).await.expect("sync");
+  let own = ella
+    .api(Method::GET, "/api/sketches/Waves123", Value::Null)
+    .await
+    .json();
+  assert_eq!(own["title"], "Waves (newer)");
+  assert_eq!(own["description"], "Draw on the canvas!");
+}
+
 #[tokio::test]
 async fn sync_refuses_bad_examples_before_writing_anything() {
   let app = TestApp::new().await;
